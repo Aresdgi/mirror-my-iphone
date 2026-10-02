@@ -5,17 +5,35 @@ Uses pymobiledevice3 for all device communication over USB.
 
 import asyncio
 import logging
-import os
 import subprocess
 import sys
 import threading
 import time
+from collections import deque
 from enum import Enum
-from pathlib import Path
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
+import wda_project
+from doctor import model_name
+
 logger = logging.getLogger(__name__)
+xcodebuild_logger = logging.getLogger('wda.xcodebuild')
+forward_logger = logging.getLogger('wda.port_forward')
+
+# After a failed connection attempt, wait this long before retrying the same device
+RETRY_DELAY = 10
+
+
+def _log_output(stream, log: logging.Logger, on_line=None):
+    """Forward a subprocess's output to a logger, line by line, until it closes.
+    Also keeps the pipe drained — a full pipe would block the subprocess."""
+    for line in stream:
+        line = line.rstrip()
+        if line:
+            log.debug(line)
+            if on_line:
+                on_line(line)
 
 
 class ConnectionState(Enum):
@@ -32,6 +50,7 @@ class DeviceManager(QObject):
     device_disconnected = pyqtSignal()
     connection_error = pyqtSignal(str)        # error message
     connection_state_changed = pyqtSignal(ConnectionState)
+    wda_state_changed = pyqtSignal(str, str)  # state ('idle', 'starting', 'running', 'failed', 'unavailable'), message
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -45,13 +64,12 @@ class DeviceManager(QObject):
         self._current_udid = None
         self._port_forward_proc = None
         self._wda_proc = None
+        self._wda_state = ('idle', '')
+        self._retry_at = 0.0
 
         # pymobiledevice3 is async-only — all device I/O runs on this dedicated event loop
         self._loop = asyncio.new_event_loop()
         threading.Thread(target=self._loop.run_forever, daemon=True).start()
-
-        # WDA project path — auto-detected
-        self._wda_project = self._find_wda_project()
 
         # Device discovery timer
         self._discovery_timer = QTimer(self)
@@ -68,6 +86,10 @@ class DeviceManager(QObject):
     @property
     def is_connected(self) -> bool:
         return self._state == ConnectionState.CONNECTED
+
+    @property
+    def wda_state(self) -> tuple[str, str]:
+        return self._wda_state
 
     def start_discovery(self, interval_ms: int = 2000):
         """Start polling for USB devices."""
@@ -96,7 +118,7 @@ class DeviceManager(QObject):
         """Check for connected USB devices."""
         try:
             devices = self.discover_devices()
-            if devices and not self.is_connected:
+            if devices and not self.is_connected and time.monotonic() >= self._retry_at:
                 # Auto-connect to first device
                 udid = devices[0].serial
                 self._connect_in_background(udid)
@@ -141,6 +163,7 @@ class DeviceManager(QObject):
                 self._run(self._close_connections_async(), timeout=5)
             except Exception:
                 pass
+            self._retry_at = time.monotonic() + RETRY_DELAY
             self._set_state(ConnectionState.ERROR)
             self.connection_error.emit(error_msg)
 
@@ -150,34 +173,34 @@ class DeviceManager(QObject):
         self._lockdown = await create_using_usbmux(serial=udid)
 
         # Get device info via lockdown (works without tunnel)
+        product_type = await self._lockdown.get_value(key='ProductType')
+        screen = await self._lockdown.get_value(domain='com.apple.mobile.iTunes') or {}
+        scale = float(screen.get('ScreenScaleFactor') or 0)
         self._device_info = {
             'name': await self._lockdown.get_value(key='DeviceName'),
-            'model': await self._lockdown.get_value(key='ProductType'),
+            'model': product_type,
+            'model_name': model_name(product_type),
             'ios_version': self._lockdown.product_version,
             'udid': self._lockdown.identifier,
+            # Native screen in pixels and its scale, e.g. 1179 x 2556 @3x
+            'screen_size': (screen.get('ScreenWidth'), screen.get('ScreenHeight')),
+            'screen_scale': scale or None,
         }
         self._current_udid = udid
 
-        # Set up DVT for screenshots
-        # Try tunnel first (needed for iOS 17+), then direct
-        dvt_connected = False
+        # DVT screenshots are only the fallback for when the USB video stream is unavailable.
+        # Try the tunnel first (needed for iOS 17+), then direct.
         try:
             await self._connect_dvt_tunnel()
-            dvt_connected = True
         except Exception as tunnel_err:
             logger.info(f"Tunnel DVT failed ({tunnel_err}), trying direct...")
             try:
                 await self._connect_dvt_direct()
-                dvt_connected = True
             except Exception as direct_err:
-                logger.error(f"Direct DVT also failed: {direct_err}")
-
-        if not dvt_connected:
-            raise ConnectionError(
-                "Developer-Tunnel wird benötigt (iOS 17+).\n"
-                "Starte in einem Terminal:\n"
-                "sudo python3 -m pymobiledevice3 remote tunneld"
-            )
+                logger.warning(
+                    f"Screenshot fallback unavailable ({direct_err}). Mirroring uses the USB video "
+                    "stream, which doesn't need it; on iOS 17+ the fallback needs the developer tunnel."
+                )
 
     async def _connect_dvt_tunnel(self):
         """Connect DVT via tunneld (required for iOS 17+).
@@ -189,7 +212,7 @@ class DeviceManager(QObject):
 
         tunneld_devices = await get_tunneld_devices()
         if not tunneld_devices:
-            raise ConnectionError("Kein Tunnel gefunden. Starte tunneld zuerst.")
+            raise ConnectionError("no tunnel found — tunneld isn't running")
 
         # Find matching device by UDID, or use first available
         target = self._current_udid.replace('-', '')
@@ -321,13 +344,16 @@ class DeviceManager(QObject):
             self._port_forward_proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
             )
+            threading.Thread(
+                target=_log_output, args=(self._port_forward_proc.stdout, forward_logger), daemon=True,
+            ).start()
             time.sleep(0.5)
 
             if self._port_forward_proc.poll() is not None:
-                stderr = self._port_forward_proc.stderr.read().decode()
-                logger.error(f"Port forward failed: {stderr}")
+                logger.error("Port forward failed — see the wda.port_forward lines in the log")
                 self._port_forward_proc = None
                 return False
 
@@ -351,110 +377,86 @@ class DeviceManager(QObject):
             self._port_forward_proc = None
             logger.info("Port forwarding stopped")
 
-    def _find_wda_project(self) -> str | None:
-        """Find WebDriverAgent.xcodeproj near the app directory."""
-        app_dir = Path(__file__).parent
-        # Check common locations
-        candidates = [
-            app_dir / 'WebDriverAgent' / 'WebDriverAgent.xcodeproj',
-            app_dir.parent / 'WebDriverAgent' / 'WebDriverAgent.xcodeproj',
-            Path.home() / 'WebDriverAgent' / 'WebDriverAgent.xcodeproj',
-        ]
-        for path in candidates:
-            if path.exists():
-                logger.info(f"Found WDA project: {path}")
-                return str(path)
-        # Spotlight search as fallback
-        try:
-            result = subprocess.run(
-                ['mdfind', 'kMDItemFSName == "WebDriverAgent.xcodeproj"'],
-                capture_output=True, text=True, timeout=5,
-            )
-            for line in result.stdout.strip().split('\n'):
-                if line and 'WebDriverAgent' in line:
-                    logger.info(f"Found WDA project via Spotlight: {line}")
-                    return line
-        except Exception:
-            pass
-        return None
+    def _set_wda_state(self, state: str, message: str = ''):
+        self._wda_state = (state, message)
+        self.wda_state_changed.emit(state, message)
 
     def start_wda(self) -> bool:
-        """Start WebDriverAgent via xcodebuild test in background.
-        Returns True if launch was initiated.
-        """
+        """Build, install and run WebDriverAgent on the device via `xcodebuild test`, in the background.
+        Returns True if it was launched (or is already running)."""
         if self._wda_proc and self._wda_proc.poll() is None:
             logger.info("WDA already running")
             return True
-
-        if not self._wda_project:
-            logger.warning("WDA project not found")
-            return False
 
         if not self._current_udid:
             logger.warning("No device connected")
             return False
 
-        # Find development team from the project
-        team_id = self._get_dev_team()
-        if not team_id:
-            logger.error("No development team found in WDA project")
+        project = wda_project.find_project()
+        if project is None:
+            self._set_wda_state('unavailable', "WebDriverAgent isn't downloaded yet — get it in the Doctor tab.")
+            logger.warning("WDA project not found")
             return False
 
-        logger.info(f"Starting WDA (team: {team_id}, device: {self._current_udid})...")
+        team = wda_project.signing_team(project)
+        if team is None:
+            self._set_wda_state('unavailable', "No Apple ID is signed in to Xcode — see the Doctor tab.")
+            logger.error("No signing team: sign in to Xcode › Settings › Accounts")
+            return False
 
-        cmd = [
-            'xcodebuild', 'test',
-            '-project', self._wda_project,
-            '-scheme', 'WebDriverAgentRunner',
-            '-destination', f'id={self._current_udid}',
-            '-allowProvisioningUpdates',
-            f'DEVELOPMENT_TEAM={team_id}',
-            'CODE_SIGN_IDENTITY=Apple Development',
-        ]
-
+        cmd = wda_project.xcodebuild_command(project, self._current_udid, team)
+        logger.info(f"Starting WDA from {project} (team {team.id}, device {self._current_udid})")
+        logger.debug(f"WDA command: {' '.join(cmd)}")
         try:
-            self._wda_proc = subprocess.Popen(
+            proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                cwd=os.path.dirname(self._wda_project),
+                text=True,
+                cwd=project.parent,
             )
-            logger.info("WDA xcodebuild started")
-            return True
         except Exception as e:
             logger.error(f"Failed to start WDA: {e}")
+            self._set_wda_state('failed', f"Couldn't run xcodebuild: {e}")
             return False
+        self._wda_proc = proc
+        self._set_wda_state('starting', "Building and installing WebDriverAgent… The first time takes a few minutes.")
+        threading.Thread(target=self._watch_wda, args=(proc,), daemon=True).start()
+        return True
 
-    def _get_dev_team(self) -> str | None:
-        """Extract development team ID from WDA project file."""
-        if not self._wda_project:
-            return None
-        try:
-            pbxproj = os.path.join(self._wda_project, 'project.pbxproj')
-            with open(pbxproj, 'r') as f:
-                content = f.read()
-            # Find DEVELOPMENT_TEAM = XXXXX; patterns
-            import re
-            matches = re.findall(r'DEVELOPMENT_TEAM\s*=\s*([A-Z0-9]{10})', content)
-            if matches:
-                return matches[0]
-        except Exception as e:
-            logger.debug(f"Failed to read dev team: {e}")
-        return None
+    def _watch_wda(self, proc: subprocess.Popen):
+        """Log xcodebuild's output, notice when WDA is up, and explain why it stopped."""
+        recent = deque(maxlen=300)
+
+        def on_line(line: str):
+            recent.append(line)
+            match = wda_project.SERVER_URL_PATTERN.search(line)
+            if match:
+                logger.info(f"WDA is up at {match.group(1)} on the device")
+                self._set_wda_state('running', "WebDriverAgent is running.")
+
+        _log_output(proc.stdout, xcodebuild_logger, on_line)
+        code = proc.wait()
+        if proc is not self._wda_proc:
+            return  # stopped on purpose
+        hint = wda_project.diagnose_failure(list(recent))
+        logger.error(f"WDA xcodebuild exited with {code}: {hint}")
+        self._set_wda_state('failed', hint)
 
     def stop_wda(self):
         """Stop the WDA xcodebuild process."""
-        if self._wda_proc:
+        proc, self._wda_proc = self._wda_proc, None
+        if proc:
             try:
-                self._wda_proc.terminate()
-                self._wda_proc.wait(timeout=5)
+                proc.terminate()
+                proc.wait(timeout=5)
             except Exception:
                 try:
-                    self._wda_proc.kill()
+                    proc.kill()
                 except Exception:
                     pass
-            self._wda_proc = None
             logger.info("WDA stopped")
+        self._set_wda_state('idle')
 
     def is_wda_running(self) -> bool:
         """Check if WDA process is still alive."""
@@ -477,6 +479,7 @@ class DeviceManager(QObject):
                 pass
             self._current_udid = None
             self._device_info = {}
+        self._retry_at = 0.0
 
         self._set_state(ConnectionState.DISCONNECTED)
         logger.info("Disconnected from device")

@@ -37,7 +37,8 @@ def enable_screen_capture_devices():
     )
 
 
-def _ios_capture_devices() -> list:
+def ios_capture_devices() -> list:
+    """Connected iOS devices offered as screen-capture sources (after enable_screen_capture_devices())."""
     if hasattr(AVFoundation, 'AVCaptureDeviceTypeExternal'):  # macOS 14+
         devices = AVFoundation.AVCaptureDeviceDiscoverySession.discoverySessionWithDeviceTypes_mediaType_position_(
             [AVFoundation.AVCaptureDeviceTypeExternal],
@@ -57,7 +58,7 @@ def find_device(name: str | None, timeout: float = 3.0):
     """
     deadline = time.monotonic() + timeout
     while True:
-        devices = _ios_capture_devices()
+        devices = ios_capture_devices()
         match = next((d for d in devices if d.localizedName() == name), None)
         if match is None and len(devices) == 1:
             match = devices[0]

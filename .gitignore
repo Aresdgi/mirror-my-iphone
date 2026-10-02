@@ -35,3 +35,6 @@ WebDriverAgent/WebDriverAgent.xcodeproj/project.xcworkspace/xcuserdata/
 
 # Logs
 *.log
+
+# Packaging output
+dist/

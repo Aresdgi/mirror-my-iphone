@@ -132,11 +132,11 @@ class ScreenCaptureThread(QThread):
         # drops the developer tunnel for a while. Frames start ~5 s after the first start and
         # pause while the iPhone display is off.
         logger.info(f"Capturing via USB video stream from {device.localizedName()}")
-        self.mode_changed.emit("USB-Video")
+        self.mode_changed.emit("USB video")
         try:
             self._report_fps_until_stopped(keep_going=lambda: stream.is_running)
             if self._running:
-                self._fail("USB-Videostream unterbrochen")
+                self._fail("USB video stream stopped")
         finally:
             stream.stop()
         return True
@@ -145,8 +145,12 @@ class ScreenCaptureThread(QThread):
 
     def _run_dvt(self):
         channels = self._device_manager.open_screenshot_channels(DVT_CHANNELS)
+        if channels == 0:
+            self._fail("No screen source: the USB stream isn't available and the screenshot fallback "
+                       "needs the developer tunnel — see the Doctor tab")
+            return
         logger.info(f"Capturing via DVT screenshots ({channels} parallel channels)")
-        self.mode_changed.emit("DVT")
+        self.mode_changed.emit("screenshots")
 
         workers = [
             threading.Thread(target=self._dvt_worker, args=(channel,), daemon=True)
@@ -179,7 +183,7 @@ class ScreenCaptureThread(QThread):
             except Exception as e:
                 consecutive_errors += 1
                 if consecutive_errors >= 10:
-                    self._fail(f"Zu viele Fehler: {e}")
+                    self._fail(f"Too many capture errors: {e}")
                 # Brief backoff
                 time.sleep(0.5)
 

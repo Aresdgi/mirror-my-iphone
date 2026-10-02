@@ -1,0 +1,28 @@
+#!/bin/bash
+# iphone-mirror — command-line companion of iPhone Mirror, put on the PATH by the Homebrew cask.
+# Runs cli.py from the app bundle with the app's Python environment. See: iphone-mirror --help
+set -euo pipefail
+
+# Follow Homebrew's symlink back into the app bundle
+SELF="${BASH_SOURCE[0]}"
+while [ -L "$SELF" ]; do
+    DIR="$(cd "$(dirname "$SELF")" && pwd)"
+    SELF="$(readlink "$SELF")"
+    [[ "$SELF" != /* ]] && SELF="$DIR/$SELF"
+done
+RESOURCES="$(cd "$(dirname "$SELF")/.." && pwd)"
+VERSION="$(/usr/bin/plutil -extract CFBundleShortVersionString raw "$RESOURCES/../Info.plist")"
+DEFAULT_VENV="$HOME/Library/Application Support/iPhone Mirror/venv"
+
+# Same search order as the app's launcher (launcher.c)
+for VENV in "${IPHONE_MIRROR_VENV:-}" "/opt/homebrew/Caskroom/iphone-mirror/$VERSION/venv" \
+    "/usr/local/Caskroom/iphone-mirror/$VERSION/venv" "$DEFAULT_VENV"; do
+    [ -n "$VENV" ] && [ -x "$VENV/bin/python3" ] \
+        && cmp -s "$RESOURCES/app/requirements.txt" "$VENV/.requirements.txt" && break
+    VENV=""
+done
+if [ -z "$VENV" ]; then
+    VENV="$DEFAULT_VENV"
+    "$RESOURCES/bootstrap.sh" "$VENV" >&2
+fi
+exec "$VENV/bin/python3" "$RESOURCES/app/cli.py" "$@"
