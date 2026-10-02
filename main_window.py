@@ -5,15 +5,15 @@ Displays the iPhone screen and handles user interaction.
 
 import logging
 
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QAction, QImage, QPixmap, QIcon
+from PyQt6.QtCore import Qt, QTimer, QPointF, QSize
+from PyQt6.QtGui import QAction, QImage, QPainter
 from PyQt6.QtWidgets import (
     QMainWindow, QLabel, QVBoxLayout, QWidget, QToolBar,
     QStatusBar, QMessageBox, QSizePolicy,
 )
 
 from device_manager import DeviceManager, ConnectionState
-from screen_capture import ScreenCaptureThread
+from screen_capture import ScreenCaptureThread, enable_video_capture
 from input_handler import InputHandler
 
 logger = logging.getLogger(__name__)
@@ -26,6 +26,8 @@ class ScreenView(QLabel):
         super().__init__(parent)
         self._input_handler = input_handler
         self._has_frame = False
+        self._frame = None
+        self._scaled_frame = None
 
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setMinimumSize(320, 568)
@@ -64,18 +66,46 @@ class ScreenView(QLabel):
         # Update iPhone screen size for coordinate mapping
         self._input_handler.update_screen_size(qimage.width(), qimage.height())
 
-        # Convert to pixmap and scale to fit label (fast mode for better FPS)
-        pixmap = QPixmap.fromImage(qimage)
-        scaled = pixmap.scaled(
-            self.size(),
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.FastTransformation,
+        # Qt coalesces update() calls, so painting never falls behind the stream
+        self._frame = qimage
+        self._scaled_frame = None
+        self.update()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if self._frame is None:
+            return
+
+        # Fit the frame centered, in the backing store's device pixels (same geometry as
+        # InputHandler.translate_coordinates, up to rounding)
+        dpr = self.devicePixelRatioF()
+        view_w, view_h = round(self.width() * dpr), round(self.height() * dpr)
+        frame_w, frame_h = self._frame.width(), self._frame.height()
+        scale = min(view_w / frame_w, view_h / frame_h)
+        size = QSize(max(1, round(frame_w * scale)), max(1, round(frame_h * scale)))
+
+        # Shrink with Qt's area-averaging filter, then draw 1:1. Letting drawImage() scale would
+        # resample bilinearly, which skips source pixels and breaks up thin text (worst at 1x).
+        scaled = self._scaled_frame
+        if scaled is None or scaled.size() != size or scaled.devicePixelRatio() != dpr:
+            scaled = self._frame.scaled(
+                size, Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation,
+            )
+            scaled.setDevicePixelRatio(dpr)
+            self._scaled_frame = scaled
+
+        painter = QPainter(self)
+        painter.drawImage(
+            QPointF((view_w - size.width()) // 2 / dpr, (view_h - size.height()) // 2 / dpr),
+            scaled,
         )
-        self.setPixmap(scaled)
+        painter.end()
 
     def show_disconnected(self):
         """Show disconnected state."""
         self._has_frame = False
+        self._frame = None
+        self._scaled_frame = None
         self._show_placeholder()
 
     # --- Mouse event handling ---
@@ -132,6 +162,7 @@ class MainWindow(QMainWindow):
         self.device_manager = DeviceManager(self)
         self.input_handler = InputHandler(self)
         self.capture_thread = None
+        self._capture_mode = ""
         self._connected = False
 
         # UI
@@ -151,6 +182,7 @@ class MainWindow(QMainWindow):
         self._wda_retry_timer.setInterval(5000)
 
         # Start device discovery
+        enable_video_capture()
         self.device_manager.start_discovery()
 
     def _setup_ui(self):
@@ -300,9 +332,10 @@ class MainWindow(QMainWindow):
         if self.capture_thread and self.capture_thread.isRunning():
             self.capture_thread.stop()
 
-        self.capture_thread = ScreenCaptureThread(self.device_manager, target_fps=15)
+        self.capture_thread = ScreenCaptureThread(self.device_manager)
         self.capture_thread.frame_ready.connect(self._on_frame)
         self.capture_thread.fps_updated.connect(self._on_fps)
+        self.capture_thread.mode_changed.connect(self._on_capture_mode)
         self.capture_thread.capture_error.connect(self._on_capture_error)
         self.capture_thread.start()
 
@@ -318,7 +351,11 @@ class MainWindow(QMainWindow):
 
     def _on_fps(self, fps: float):
         """Update FPS display."""
-        self._fps_label.setText(f"{fps:.0f} FPS")
+        self._fps_label.setText(f"{fps:.0f} FPS ({self._capture_mode})")
+
+    def _on_capture_mode(self, mode: str):
+        """Remember how frames are captured (USB video stream or DVT screenshots)."""
+        self._capture_mode = mode
 
     def _on_capture_error(self, msg: str):
         """Handle capture error."""
@@ -405,11 +442,3 @@ class MainWindow(QMainWindow):
         self.input_handler.cleanup()
         self.device_manager.cleanup()
         super().closeEvent(event)
-
-    def resizeEvent(self, event):
-        """Handle window resize — the ScreenView handles scaling automatically."""
-        super().resizeEvent(event)
-        # Re-render current frame at new size if we have one
-        if self.screen_view._has_frame and self.screen_view.pixmap():
-            # The next frame from capture thread will auto-scale
-            pass

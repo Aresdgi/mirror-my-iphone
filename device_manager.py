@@ -38,8 +38,8 @@ class DeviceManager(QObject):
         self._state = ConnectionState.DISCONNECTED
         self._lockdown = None
         self._rsd = None
-        self._dvt = None
-        self._screenshot_service = None
+        self._screenshot_provider = None   # rsd (tunnel) or lockdown (direct)
+        self._screenshot_channels = []      # (DvtProvider, Screenshot) pairs, usable in parallel
         self._device_info = {}
         self._lock = threading.Lock()
         self._current_udid = None
@@ -215,17 +215,39 @@ class DeviceManager(QObject):
         from pymobiledevice3.services.dvt.instruments.dvt_provider import DvtProvider
         from pymobiledevice3.services.dvt.instruments.screenshot import Screenshot
 
-        self._dvt = DvtProvider(service_provider)
-        await self._dvt.connect()
-        self._screenshot_service = Screenshot(self._dvt)
-        await self._screenshot_service.connect()
+        dvt = DvtProvider(service_provider)
+        await dvt.connect()
+        try:
+            screenshot = Screenshot(dvt)
+            await screenshot.connect()
+        except BaseException:
+            await dvt.close()
+            raise
+        self._screenshot_provider = service_provider
+        self._screenshot_channels.append((dvt, screenshot))
 
-    def take_screenshot(self) -> bytes:
-        """Take a screenshot. Returns PNG bytes. Thread-safe."""
+    def open_screenshot_channels(self, count: int) -> int:
+        """Open additional DVT screenshot channels, up to `count` in total.
+
+        The device serves each channel independently, so capturing on several channels
+        in parallel multiplies the screenshot rate. Returns the number of open channels.
+        """
+        while self._screenshot_provider and len(self._screenshot_channels) < count:
+            try:
+                self._run(self._open_screenshot_service(self._screenshot_provider))
+            except Exception as e:
+                logger.warning(f"Could not open extra screenshot channel: {e}")
+                break
+        return len(self._screenshot_channels)
+
+    def take_screenshot(self, channel: int = 0) -> bytes:
+        """Take a screenshot on the given channel. Returns PNG bytes.
+        Thread-safe; different channels can be used in parallel."""
         with self._lock:
-            if not self._screenshot_service:
+            if channel >= len(self._screenshot_channels):
                 raise ConnectionError("Screenshot service not available")
-            return self._run(self._screenshot_service.get_screenshot())
+            _, screenshot = self._screenshot_channels[channel]
+        return self._run(screenshot.get_screenshot())
 
     def get_battery_info(self) -> dict:
         """Query battery level and charging status."""
@@ -461,14 +483,15 @@ class DeviceManager(QObject):
 
     async def _close_connections_async(self):
         """Close screenshot, DVT, tunnel and lockdown connections, ignoring errors."""
-        for conn in (self._screenshot_service, self._dvt, self._rsd, self._lockdown):
+        channels = [conn for pair in self._screenshot_channels for conn in reversed(pair)]
+        self._screenshot_channels = []
+        self._screenshot_provider = None
+        for conn in (*channels, self._rsd, self._lockdown):
             if conn is not None:
                 try:
                     await conn.close()
                 except Exception:
                     pass
-        self._screenshot_service = None
-        self._dvt = None
         self._rsd = None
         self._lockdown = None
 
