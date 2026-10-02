@@ -1,16 +1,16 @@
 #!/bin/bash
-# Creates or updates the Python environment (a venv) iPhone Mirror runs in.
+# Creates or updates the Python environment (a venv) Mirror my iPhone runs in.
 #
 #   bootstrap.sh [VENV]
 #
 # The Homebrew cask runs it after installing, with a venv in its Caskroom directory. Without an
-# argument (setup.command, when the app finds no environment) it uses $IPHONE_MIRROR_VENV or
-# ~/Library/Application Support/iPhone Mirror/venv.
+# argument (setup.command, when the app finds no environment) it uses $MIRROR_MY_IPHONE_VENV or
+# ~/Library/Application Support/Mirror my iPhone/venv.
 set -euo pipefail
 
 RESOURCES="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REQUIREMENTS="$RESOURCES/app/requirements.txt"
-VENV="${1:-${IPHONE_MIRROR_VENV:-$HOME/Library/Application Support/iPhone Mirror/venv}}"
+VENV="${1:-${MIRROR_MY_IPHONE_VENV:-$HOME/Library/Application Support/Mirror my iPhone/venv}}"
 STAMP="$VENV/.requirements.txt"
 
 find_python() {
@@ -32,7 +32,7 @@ find_python() {
 
 if [ -x "$VENV/bin/python3" ] && cmp -s "$REQUIREMENTS" "$STAMP" \
     && "$VENV/bin/python3" -c 'import PyQt6, pymobiledevice3' 2>/dev/null; then
-    echo "iPhone Mirror: Python environment is up to date ($VENV)"
+    echo "Mirror my iPhone: Python environment is up to date ($VENV)"
     exit 0
 fi
 
@@ -46,12 +46,12 @@ if [ -d "$VENV" ] && ! "$VENV/bin/python3" -c '' 2>/dev/null; then
     rm -rf "$VENV"
 fi
 if [ ! -d "$VENV" ]; then
-    echo "iPhone Mirror: creating a Python environment with $("$PYTHON" --version) in $VENV"
+    echo "Mirror my iPhone: creating a Python environment with $("$PYTHON" --version) in $VENV"
     mkdir -p "$(dirname "$VENV")"
     "$PYTHON" -m venv "$VENV"
 fi
 
-echo "iPhone Mirror: installing dependencies (about a minute)…"
+echo "Mirror my iPhone: installing dependencies (about a minute)…"
 "$VENV/bin/python3" -m pip install --disable-pip-version-check --quiet --upgrade pip
 "$VENV/bin/python3" -m pip install --disable-pip-version-check --quiet -r "$REQUIREMENTS"
 
@@ -68,4 +68,4 @@ print(path if library and not library.endswith('.a') and os.path.exists(path) el
 PYTHON
 
 cp "$REQUIREMENTS" "$STAMP"
-echo "iPhone Mirror: Python environment ready ($VENV)"
+echo "Mirror my iPhone: Python environment ready ($VENV)"

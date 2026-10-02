@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-iPhone Mirror — See and control your iPhone from your Mac.
+Mirror my iPhone — See and control your iPhone from your Mac.
 Alternative to Apple's iPhone Mirroring for EU users.
 
 Usage:
@@ -34,7 +34,7 @@ def check_dependencies():
 
 
 def setup_logging():
-    """Log to the terminal (info and up), and at debug level to ~/Library/Logs/iPhone Mirror
+    """Log to the terminal (info and up), and at debug level to ~/Library/Logs/Mirror my iPhone
     and the Logs tab."""
     from log_panel import LOG_BUFFER, LOG_DATE_FORMAT, LOG_FORMAT
 
@@ -72,7 +72,7 @@ def setup_logging():
 
 
 def set_macos_app_name():
-    """When run as `python main.py`, show "iPhone Mirror" in the menu bar instead of "Python".
+    """When run as `python main.py`, show "Mirror my iPhone" in the menu bar instead of "Python".
     (The .app bundle's Info.plist takes care of this when running from the bundle.)"""
     try:
         from Foundation import NSBundle
@@ -85,7 +85,7 @@ def main():
     check_dependencies()
     setup_logging()
     logging.getLogger('main').info(
-        f"iPhone Mirror {__version__} starting (Python {sys.version.split()[0]}, "
+        f"Mirror my iPhone {__version__} starting (Python {sys.version.split()[0]}, "
         f"{'app bundle ' + str(paths.bundle_path()) if paths.bundle_path() else 'from source'})"
     )
 
@@ -106,7 +106,7 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName(paths.APP_NAME)
     app.setApplicationVersion(__version__)
-    app.setOrganizationName('iPhoneMirroring')
+    app.setOrganizationName('Mirror-my-iPhone')
     icon = paths.APP_DIR / 'assets' / 'AppIcon.png'
     if not paths.bundle_path() and icon.exists():
         app.setWindowIcon(QIcon(str(icon)))  # Dock icon when running from source

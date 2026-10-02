@@ -1,10 +1,10 @@
 /*
- * iPhone Mirror launcher, the .app's main executable.
+ * Mirror my iPhone launcher, the .app's main executable.
  *
  * Runs the app's Python code inside this process by loading libpython from the Python that the
  * app's environment (a venv, see find_venv) was created with. That way
- * macOS shows "iPhone Mirror" with its own icon in the Dock and menu bar, not "Python", and
- * permission prompts (camera) name iPhone Mirror. Passing the venv's interpreter as argv[0]
+ * macOS shows "Mirror my iPhone" with its own icon in the Dock and menu bar, not "Python", and
+ * permission prompts (camera) name Mirror my iPhone. Passing the venv's interpreter as argv[0]
  * makes Python use the venv, so sys.executable works for subprocesses too.
  *
  * If no environment fits this version's requirements, it opens setup.command in Terminal
@@ -67,17 +67,17 @@ static int venv_ready(const char *venv, const char *requirements) {
     return access(python, X_OK) == 0 && same_contents(requirements, stamp);
 }
 
-/* The first usable environment: $IPHONE_MIRROR_VENV, the one the Homebrew cask builds in its
-   Caskroom, then ~/Library/Application Support/iPhone Mirror/venv (made by setup.command). */
+/* The first usable environment: $MIRROR_MY_IPHONE_VENV, the one the Homebrew cask builds in its
+   Caskroom, then ~/Library/Application Support/Mirror my iPhone/venv (made by setup.command). */
 static int find_venv(const char *requirements, char *venv, size_t size) {
     const char *home = getenv("HOME");
-    const char *override = getenv("IPHONE_MIRROR_VENV");
+    const char *override = getenv("MIRROR_MY_IPHONE_VENV");
     char candidates[4][PATH_MAX];
     int count = 0;
     if (override && *override) snprintf(candidates[count++], PATH_MAX, "%s", override);
-    snprintf(candidates[count++], PATH_MAX, "/opt/homebrew/Caskroom/iphone-mirror/%s/venv", APP_VERSION);
-    snprintf(candidates[count++], PATH_MAX, "/usr/local/Caskroom/iphone-mirror/%s/venv", APP_VERSION);
-    snprintf(candidates[count++], PATH_MAX, "%s/Library/Application Support/iPhone Mirror/venv", home ? home : "");
+    snprintf(candidates[count++], PATH_MAX, "/opt/homebrew/Caskroom/mirror-my-iphone/%s/venv", APP_VERSION);
+    snprintf(candidates[count++], PATH_MAX, "/usr/local/Caskroom/mirror-my-iphone/%s/venv", APP_VERSION);
+    snprintf(candidates[count++], PATH_MAX, "%s/Library/Application Support/Mirror my iPhone/venv", home ? home : "");
     for (int i = 0; i < count; i++) {
         if (venv_ready(candidates[i], requirements)) {
             snprintf(venv, size, "%s", candidates[i]);
@@ -99,10 +99,10 @@ int main(int argc, char **argv) {
     char executable[PATH_MAX], contents[PATH_MAX];
     uint32_t size = sizeof executable;
     if (_NSGetExecutablePath(executable, &size) != 0 || !realpath(executable, contents)) {
-        fprintf(stderr, "iPhone Mirror: can't locate the app bundle\n");
+        fprintf(stderr, "Mirror my iPhone: can't locate the app bundle\n");
         return 1;
     }
-    parent_dir(contents, 2); /* .../iPhone Mirror.app/Contents/MacOS/iPhone Mirror → .../Contents */
+    parent_dir(contents, 2); /* .../Mirror my iPhone.app/Contents/MacOS/Mirror my iPhone → .../Contents */
 
     char main_py[PATH_MAX], requirements[PATH_MAX], setup[PATH_MAX];
     snprintf(main_py, sizeof main_py, "%s/Resources/app/main.py", contents);
@@ -112,7 +112,7 @@ int main(int argc, char **argv) {
     char venv[PATH_MAX], python[PATH_MAX], libpython_file[PATH_MAX];
     if (!find_venv(requirements, venv, sizeof venv)) {
         execl("/usr/bin/open", "open", "-a", "Terminal", setup, (char *)NULL);
-        perror("iPhone Mirror: open setup.command");
+        perror("Mirror my iPhone: open setup.command");
         return 1;
     }
     snprintf(python, sizeof python, "%s/bin/python3", venv);
@@ -138,9 +138,9 @@ int main(int argc, char **argv) {
         void *library = dlopen(libpython, RTLD_NOW | RTLD_GLOBAL);
         py_bytes_main_t py_bytes_main = library ? (py_bytes_main_t)dlsym(library, "Py_BytesMain") : NULL;
         if (py_bytes_main) return py_bytes_main(python_argc, python_argv);
-        fprintf(stderr, "iPhone Mirror: can't load %s (%s), running Python directly\n", libpython, dlerror());
+        fprintf(stderr, "Mirror my iPhone: can't load %s (%s), running Python directly\n", libpython, dlerror());
     }
     execv(python, python_argv);
-    perror("iPhone Mirror: exec python");
+    perror("Mirror my iPhone: exec python");
     return 1;
 }

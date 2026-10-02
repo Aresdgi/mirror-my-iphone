@@ -1,44 +1,44 @@
-cask "iphone-mirror" do
+cask "mirror-my-iphone" do
   version "0.2.0"
   sha256 "b5b0a116459eb613d55308ec5516afa9f6781e2224c34f3134dc3370083dc3d0"
 
-  url "https://github.com/bhuwanadhikari/iPhoneMirroring/releases/download/v#{version}/iPhoneMirror-#{version}.zip"
-  name "iPhone Mirror"
+  url "https://github.com/bhuwanadhikari/Mirror-my-iPhone/releases/download/v#{version}/Mirror-my-iPhone-#{version}.zip"
+  name "Mirror my iPhone"
   desc "Mirror and control an iPhone over USB"
-  homepage "https://github.com/bhuwanadhikari/iPhoneMirroring"
+  homepage "https://github.com/bhuwanadhikari/Mirror-my-iPhone"
 
   depends_on formula: "python@3.12"
   depends_on macos: :ventura
 
-  app "iPhone Mirror.app"
-  binary "#{appdir}/iPhone Mirror.app/Contents/Resources/bin/iphone-mirror"
+  app "Mirror my iPhone.app"
+  binary "#{appdir}/Mirror my iPhone.app/Contents/Resources/bin/mirror-my-iphone"
 
   postflight_steps do
     # The app is ad-hoc signed, not notarized: without this, macOS refuses to open it
-    run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{appdir}}/iPhone Mirror.app"]
+    run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{appdir}}/Mirror my iPhone.app"]
     # Python environment, kept with this version in the Caskroom (the app looks for it there).
     # Install steps run sandboxed with a temporary HOME, so it can't go in ~/Library.
     # If this fails (e.g. offline), the app sets one up on its first launch instead.
-    run "{{appdir}}/iPhone Mirror.app/Contents/Resources/bootstrap.sh",
+    run "{{appdir}}/Mirror my iPhone.app/Contents/Resources/bootstrap.sh",
         args:           ["{{staged_path}}/venv"],
         must_succeed:   false,
         print_stdout:   true,
         network_access: true
   end
 
-  uninstall quit: "io.github.bhuwanadhikari.iphonemirror"
+  uninstall quit: "io.github.bhuwanadhikari.mirrormyiphone"
 
   zap trash: [
-    "~/Library/Application Support/iPhone Mirror",
-    "~/Library/Logs/iPhone Mirror",
-    "~/Library/Saved Application State/io.github.bhuwanadhikari.iphonemirror.savedState",
+    "~/Library/Application Support/Mirror my iPhone",
+    "~/Library/Logs/Mirror my iPhone",
+    "~/Library/Saved Application State/io.github.bhuwanadhikari.mirrormyiphone.savedState",
   ]
 
   caveats <<~EOS
-    Open iPhone Mirror from Spotlight or Launchpad. On first launch it runs a
+    Open Mirror my iPhone from Spotlight or Launchpad. On first launch it runs a
     doctor that checks your iPhone and lists anything that's missing. Run it
     from the terminal any time with:
-      iphone-mirror doctor
+      mirror-my-iphone doctor
 
     Click, double-click and swipe need Xcode (free in the App Store) and
     Developer Mode on the iPhone; the doctor walks you through both.

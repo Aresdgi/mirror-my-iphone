@@ -116,7 +116,7 @@ class VideoStream:
         })
         output.setAlwaysDiscardsLateVideoFrames_(True)
         self._delegate = _FrameDelegate.alloc().initWithCallback_(on_frame)
-        self._queue = libdispatch.dispatch_queue_create(b'iphone-mirror.video', None)
+        self._queue = libdispatch.dispatch_queue_create(b'mirror-my-iphone.video', None)
         output.setSampleBufferDelegate_queue_(self._delegate, self._queue)
         if not self._session.canAddOutput_(output):
             raise RuntimeError("Cannot add video output")

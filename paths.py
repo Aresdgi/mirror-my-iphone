@@ -1,14 +1,14 @@
 """
-Paths — where iPhone Mirror keeps its Python environment, logs, settings and WebDriverAgent.
+Paths — where Mirror my iPhone keeps its Python environment, logs, settings and WebDriverAgent.
 Shared by the app, the doctor and the CLI.
 """
 
 import sys
 from pathlib import Path
 
-APP_NAME = 'iPhone Mirror'
-BUNDLE_ID = 'io.github.bhuwanadhikari.iphonemirror'
-HOMEPAGE = 'https://github.com/bhuwanadhikari/iPhoneMirroring'
+APP_NAME = 'Mirror my iPhone'
+BUNDLE_ID = 'io.github.bhuwanadhikari.mirrormyiphone'
+HOMEPAGE = 'https://github.com/bhuwanadhikari/Mirror-my-iPhone'
 
 # Directory holding the app's Python sources (the repo, or Contents/Resources/app in the .app bundle)
 APP_DIR = Path(__file__).resolve().parent
@@ -16,7 +16,7 @@ APP_DIR = Path(__file__).resolve().parent
 SUPPORT_DIR = Path.home() / 'Library' / 'Application Support' / APP_NAME
 SETTINGS_FILE = SUPPORT_DIR / 'settings.ini'
 LOG_DIR = Path.home() / 'Library' / 'Logs' / APP_NAME
-LOG_FILE = LOG_DIR / 'iphone-mirror.log'
+LOG_FILE = LOG_DIR / 'mirror-my-iphone.log'
 
 # The doctor downloads WebDriverAgent (touch control) here, pinned to a release it was tested with
 WDA_DIR = SUPPORT_DIR / 'WebDriverAgent'
@@ -25,7 +25,7 @@ WDA_VERSION = 'v16.13.6'
 WDA_PORT = 8100
 
 # tunneld runs as root, so it logs to /tmp rather than into the user's Library
-TUNNELD_LOG = Path('/tmp/iphone-mirror-tunneld.log')
+TUNNELD_LOG = Path('/tmp/mirror-my-iphone-tunneld.log')
 
 
 def bundle_path() -> Path | None:

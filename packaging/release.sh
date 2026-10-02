@@ -1,7 +1,7 @@
 #!/bin/bash
-# Publishes the version in version.py: builds the zip, points Casks/iphone-mirror.rb at it,
+# Publishes the version in version.py: builds the zip, points Casks/mirror-my-iphone.rb at it,
 # commits and pushes that, and creates the GitHub release vX.Y.Z with the zip attached.
-# After that, `brew upgrade --cask iphone-mirror` picks it up.
+# After that, `brew upgrade --cask mirror-my-iphone` picks it up.
 #
 #   1. bump __version__ in version.py and commit
 #   2. packaging/release.sh
@@ -10,7 +10,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CASK="$ROOT/Casks/iphone-mirror.rb"
+CASK="$ROOT/Casks/mirror-my-iphone.rb"
 cd "$ROOT"
 
 command -v gh >/dev/null || { echo "error: the GitHub CLI is missing: brew install gh" >&2; exit 1; }
@@ -18,7 +18,7 @@ command -v gh >/dev/null || { echo "error: the GitHub CLI is missing: brew insta
 
 "$ROOT/packaging/build_app.sh"
 VERSION="$(sed -n "s/^__version__ = '\(.*\)'$/\1/p" "$ROOT/version.py")"
-ZIP="$ROOT/dist/iPhoneMirror-$VERSION.zip"
+ZIP="$ROOT/dist/Mirror-my-iPhone-$VERSION.zip"
 SHA="$(shasum -a 256 "$ZIP" | cut -d' ' -f1)"
 
 if gh release view "v$VERSION" >/dev/null 2>&1; then
@@ -31,8 +31,8 @@ git diff --stat
 read -r -p "Commit the cask, push, and publish release v$VERSION on GitHub? [y/N] " answer
 [ "$answer" = y ] || [ "$answer" = Y ] || { git checkout -- "$CASK"; echo "Cancelled."; exit 1; }
 
-git commit -m "iPhone Mirror $VERSION" -- "$CASK"
+git commit -m "Mirror my iPhone $VERSION" -- "$CASK"
 git push
 gh release create "v$VERSION" "$ZIP" --target "$(git rev-parse HEAD)" \
-    --title "iPhone Mirror $VERSION" --generate-notes
-echo "Published. Install with: brew install --cask bhuwanadhikari/iphone-mirror/iphone-mirror"
+    --title "Mirror my iPhone $VERSION" --generate-notes
+echo "Published. Install with: brew install --cask bhuwanadhikari/mirror-my-iphone/mirror-my-iphone"

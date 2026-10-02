@@ -4,7 +4,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV_DIR="$SCRIPT_DIR/.venv"
 
-echo "=== iPhone Mirror Tool - Setup ==="
+echo "=== Mirror my iPhone - Setup ==="
 echo ""
 
 # Check Python version

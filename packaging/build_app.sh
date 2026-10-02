@@ -1,23 +1,23 @@
 #!/bin/bash
-# Builds "dist/iPhone Mirror.app" and dist/iPhoneMirror-<version>.zip (the Homebrew cask's download).
+# Builds "dist/Mirror my iPhone.app" and dist/Mirror-my-iPhone-<version>.zip (the Homebrew cask's download).
 #
 #   packaging/build_app.sh
 #
 # The bundle holds a small native launcher, the app's Python sources and its icon. Python and the
 # dependencies live outside it, in a venv that bootstrap.sh creates: in the Caskroom when
-# installed with Homebrew, else in ~/Library/Application Support/iPhone Mirror. Needs Xcode's
+# installed with Homebrew, else in ~/Library/Application Support/Mirror my iPhone. Needs Xcode's
 # command line tools.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PACKAGING="$ROOT/packaging"
 DIST="$ROOT/dist"
-APP="$DIST/iPhone Mirror.app"
+APP="$DIST/Mirror my iPhone.app"
 VERSION="$(sed -n "s/^__version__ = '\(.*\)'$/\1/p" "$ROOT/version.py")"
 BUNDLE_ID="$(sed -n "s/^BUNDLE_ID = '\(.*\)'$/\1/p" "$ROOT/paths.py")"
 [ -n "$VERSION" ] && [ -n "$BUNDLE_ID" ] || { echo "error: can't read version or bundle ID" >&2; exit 1; }
 
-echo "Building iPhone Mirror $VERSION ($BUNDLE_ID)"
+echo "Building Mirror my iPhone $VERSION ($BUNDLE_ID)"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/app" "$APP/Contents/Resources/bin"
 
@@ -27,7 +27,7 @@ printf 'APPL????' > "$APP/Contents/PkgInfo"
 
 # Launcher, for Apple silicon and Intel
 clang -O2 -Wall -Wextra -Werror -arch arm64 -arch x86_64 -mmacosx-version-min=13.0 \
-    -DAPP_VERSION="\"$VERSION\"" -o "$APP/Contents/MacOS/iPhone Mirror" "$PACKAGING/launcher.c"
+    -DAPP_VERSION="\"$VERSION\"" -o "$APP/Contents/MacOS/Mirror my iPhone" "$PACKAGING/launcher.c"
 
 # Icon
 ICONSET="$(mktemp -d)/AppIcon.iconset"
@@ -42,16 +42,16 @@ rm -rf "$(dirname "$ICONSET")"
 # App sources and helper scripts
 cp "$ROOT"/*.py "$ROOT/requirements.txt" "$APP/Contents/Resources/app/"
 cp "$PACKAGING/bootstrap.sh" "$PACKAGING/setup.command" "$APP/Contents/Resources/"
-cp "$PACKAGING/iphone-mirror" "$APP/Contents/Resources/bin/"
+cp "$PACKAGING/mirror-my-iphone" "$APP/Contents/Resources/bin/"
 chmod +x "$APP/Contents/Resources/bootstrap.sh" "$APP/Contents/Resources/setup.command" \
-    "$APP/Contents/Resources/bin/iphone-mirror"
+    "$APP/Contents/Resources/bin/mirror-my-iphone"
 xattr -cr "$APP"
 
 # Ad-hoc signature: required for arm64 code. The app isn't notarized (the cask clears quarantine).
 codesign --force --sign - --timestamp=none "$APP"
 codesign --verify --strict "$APP"
 
-ZIP="$DIST/iPhoneMirror-$VERSION.zip"
+ZIP="$DIST/Mirror-my-iPhone-$VERSION.zip"
 rm -f "$ZIP"
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
 echo "Built $APP"

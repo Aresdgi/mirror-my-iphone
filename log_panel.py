@@ -1,6 +1,6 @@
 """
-Logs tab — the developer log, live: everything iPhone Mirror, pymobiledevice3 and xcodebuild
-(WebDriverAgent) write. The same log is kept in ~/Library/Logs/iPhone Mirror.
+Logs tab — the developer log, live: everything Mirror my iPhone, pymobiledevice3 and xcodebuild
+(WebDriverAgent) write. The same log is kept in ~/Library/Logs/Mirror my iPhone.
 """
 
 import collections

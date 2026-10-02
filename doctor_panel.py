@@ -150,7 +150,7 @@ class DoctorPanel(QWidget):
         scroll.setWidget(content)
 
         footer = _wrapping_label(
-            f"iPhone Mirror {__version__} · Python {platform.python_version()} · macOS {platform.mac_ver()[0]}",
+            f"Mirror my iPhone {__version__} · Python {platform.python_version()} · macOS {platform.mac_ver()[0]}",
             '#636366', 10)
 
         top = QVBoxLayout()

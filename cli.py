@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-iphone-mirror — command-line companion of the iPhone Mirror app.
+mirror-my-iphone — command-line companion of the Mirror my iPhone app.
 
-    iphone-mirror            open the app
-    iphone-mirror doctor     check the prerequisites and explain how to fix what's missing
-    iphone-mirror tunnel     run the developer tunnel in this terminal (iOS 17+, needs sudo)
-    iphone-mirror logs       follow the app's log
+    mirror-my-iphone            open the app
+    mirror-my-iphone doctor     check the prerequisites and explain how to fix what's missing
+    mirror-my-iphone tunnel     run the developer tunnel in this terminal (iOS 17+, needs sudo)
+    mirror-my-iphone logs       follow the app's log
 """
 
 import argparse
@@ -21,7 +21,7 @@ from version import __version__
 
 _ICONS = {'ok': '✓', 'warn': '!', 'fail': '✗', 'info': 'i', 'skip': '–'}
 _COLORS = {'ok': '32', 'warn': '33', 'fail': '31', 'info': '36', 'skip': '90'}
-_TITLE_WIDTH = 32
+_TITLE_WIDTH = 34
 
 
 def _style(text: str, code: str, enabled: bool) -> str:
@@ -53,7 +53,7 @@ def cmd_doctor(_args) -> int:
     wrap = textwrap.TextWrapper(break_long_words=False, break_on_hyphens=False)
     indent = ' ' * (_TITLE_WIDTH + 7)
 
-    print(_style(f"iPhone Mirror {__version__} — doctor", '1', color))
+    print(_style(f"Mirror my iPhone {__version__} — doctor", '1', color))
     checks, group = [], None
     for check in doctor.iter_checks(in_app=False):
         checks.append(check)
@@ -85,14 +85,14 @@ def cmd_tunnel(_args) -> int:
 
 def cmd_logs(_args) -> int:
     if not paths.LOG_FILE.exists():
-        print(f"No log yet — it's created when iPhone Mirror first starts ({paths.LOG_FILE}).")
+        print(f"No log yet — it's created when Mirror my iPhone first starts ({paths.LOG_FILE}).")
         return 1
     os.execvp('tail', ['tail', '-n', '200', '-F', str(paths.LOG_FILE)])
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        prog='iphone-mirror', description="Mirror and control your iPhone from your Mac.",
+        prog='mirror-my-iphone', description="Mirror and control your iPhone from your Mac.",
     )
     parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
     commands = parser.add_subparsers(dest='command', metavar='command')

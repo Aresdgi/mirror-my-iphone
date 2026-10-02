@@ -50,11 +50,11 @@ class SigningTeam:
 
 
 def find_project() -> Path | None:
-    """Locate WebDriverAgent.xcodeproj: $IPHONE_MIRROR_WDA, the repo submodule, the doctor's
+    """Locate WebDriverAgent.xcodeproj: $MIRROR_MY_IPHONE_WDA, the repo submodule, the doctor's
     download location, a sibling checkout, ~/WebDriverAgent, then Spotlight."""
     candidates = []
-    if os.environ.get('IPHONE_MIRROR_WDA'):
-        candidates.append(Path(os.environ['IPHONE_MIRROR_WDA']).expanduser())
+    if os.environ.get('MIRROR_MY_IPHONE_WDA'):
+        candidates.append(Path(os.environ['MIRROR_MY_IPHONE_WDA']).expanduser())
     candidates += [
         paths.APP_DIR / 'WebDriverAgent',
         paths.WDA_DIR,
@@ -135,6 +135,8 @@ def signing_team(project: Path | None) -> SigningTeam | None:
 def runner_bundle_id(project: Path, team: SigningTeam) -> str | None:
     """A bundle ID this team can register, if the project still uses Facebook's."""
     if f'PRODUCT_BUNDLE_IDENTIFIER = {DEFAULT_RUNNER_BUNDLE_ID};' in _read_pbxproj(project):
+        # Keeps the app's old name: a new prefix would register another App ID (free teams get
+        # 10 a week) and install a second WebDriverAgent next to the one already on the iPhone.
         return f'io.github.iphonemirror.{team.id.lower()}.WebDriverAgentRunner'
     return None
 

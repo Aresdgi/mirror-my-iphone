@@ -1,7 +1,7 @@
 """
-Doctor — checks everything iPhone Mirror needs and explains how to fix what's missing.
+Doctor — checks everything Mirror my iPhone needs and explains how to fix what's missing.
 
-UI-independent: the Doctor tab and `iphone-mirror doctor` both render these results.
+UI-independent: the Doctor tab and `mirror-my-iphone doctor` both render these results.
 Checks only read state; fixes in ACTIONS run only when the user asks for them.
 """
 
@@ -126,7 +126,7 @@ class _Device:
 def iter_checks(in_app: bool = True, wda_state: Callable[[], tuple[str, str]] | None = None) -> Iterator[Check]:
     """Run all checks, yielding each result as soon as it is known.
 
-    in_app: running inside iPhone Mirror (rather than the CLI), so per-app state like
+    in_app: running inside Mirror my iPhone (rather than the CLI), so per-app state like
         camera access refers to the app itself.
     wda_state: returns the app's WebDriverAgent (state, message), if the app is running.
     """
@@ -199,20 +199,20 @@ def _check_video_source(device: _Device) -> Check:
         import video_stream
     except ImportError as e:
         return Check(MIRRORING, title, Status.WARN, f"AVFoundation bindings are missing ({e}).",
-                     fix="Reinstall iPhone Mirror. Until then it falls back to screenshots (about 20 FPS).")
+                     fix="Reinstall Mirror my iPhone. Until then it falls back to screenshots (about 20 FPS).")
     sources = video_stream.ios_capture_devices()
     if any(d.localizedName() == device.name for d in sources) or len(sources) == 1:
         return Check(MIRRORING, title, Status.OK, "Available — up to 60 FPS.")
     return Check(MIRRORING, title, Status.WARN, "The iPhone isn't offered as a video source yet.",
-                 fix="Unlock the iPhone and re-check. Until then iPhone Mirror falls back to "
+                 fix="Unlock the iPhone and re-check. Until then Mirror my iPhone falls back to "
                      "screenshots, which are slower and need the developer tunnel (see Optional).")
 
 
 def _check_camera_access(in_app: bool) -> Check:
-    title = 'Camera access for iPhone Mirror'
+    title = 'Camera access for Mirror my iPhone'
     if not in_app:
         return Check(MIRRORING, title, Status.INFO,
-                     "macOS treats the iPhone's screen stream like a camera and asks iPhone Mirror "
+                     "macOS treats the iPhone's screen stream like a camera and asks Mirror my iPhone "
                      "for access the first time it mirrors. Checked inside the app.")
     try:
         import AVFoundation
@@ -227,7 +227,7 @@ def _check_camera_access(in_app: bool) -> Check:
                      fix="Click Allow, or accept the prompt when mirroring starts.",
                      action='request_camera', action_label='Allow…')
     return Check(MIRRORING, title, Status.FAIL, "Denied — the screen stream can't start.",
-                 fix="System Settings › Privacy & Security › Camera › turn on iPhone Mirror, then restart the app.",
+                 fix="System Settings › Privacy & Security › Camera › turn on Mirror my iPhone, then restart the app.",
                  action='open_camera_settings', action_label='Open Settings')
 
 
@@ -245,7 +245,7 @@ def _check_developer_mode(device: _Device) -> Check:
         return Check(TOUCH, title, Status.OK, "On.")
     return Check(TOUCH, title, Status.FAIL, "Off.",
                  fix="On the iPhone: Settings › Privacy & Security › Developer Mode → On, then restart it. "
-                     "If the option is missing, iPhone Mirror can reveal it (Show on iPhone).",
+                     "If the option is missing, Mirror my iPhone can reveal it (Show on iPhone).",
                  action='reveal_developer_mode', action_label='Show on iPhone')
 
 
@@ -293,7 +293,7 @@ def _check_wda_project(project: Path | None) -> Check:
     title = 'WebDriverAgent downloaded'
     if project is None:
         return Check(TOUCH, title, Status.FAIL, "Not found.",
-                     fix="iPhone Mirror can download it for you (about 5 MB), or clone it yourself: "
+                     fix="Mirror my iPhone can download it for you (about 5 MB), or clone it yourself: "
                          f"git clone --depth 1 --branch {paths.WDA_VERSION} {paths.WDA_REPO} ~/WebDriverAgent",
                      action='download_wda', action_label='Download')
     version = wda_project.project_version(project)
@@ -321,7 +321,7 @@ def _check_wda_running(device: _Device, running: bool, wda_state) -> Check:
     if device.usb is None:
         return Check(TOUCH, title, Status.SKIP, "Connect an iPhone first.")
     return Check(TOUCH, title, Status.INFO,
-                 "Not running. iPhone Mirror builds and starts it whenever the iPhone connects "
+                 "Not running. Mirror my iPhone builds and starts it whenever the iPhone connects "
                  "(the first build takes a few minutes).")
 
 
@@ -471,7 +471,7 @@ def _start_tunnel() -> str:
 
     command = f"{shlex.join(paths.tunneld_command())} --daemonize > {paths.TUNNELD_LOG} 2>&1"
     script = (f"do shell script {_applescript_string(command)} "
-              f"with prompt {_applescript_string('iPhone Mirror wants to start the developer tunnel.')} "
+              f"with prompt {_applescript_string('Mirror my iPhone wants to start the developer tunnel.')} "
               f"with administrator privileges")
     result = subprocess.run(['osascript', '-e', script], capture_output=True, text=True, timeout=300)
     if result.returncode != 0:

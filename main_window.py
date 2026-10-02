@@ -189,7 +189,7 @@ class ScreenView(QWidget):
 
 
 class MainWindow(QMainWindow):
-    """Main application window for iPhone Mirror."""
+    """Main application window for Mirror my iPhone."""
 
     ZOOM_LEVELS = (0.5, 0.625, 0.75, 0.875, 1.0, 1.25)
     DEFAULT_SCREEN = QSizeF(393, 852)  # iPhone 15/16, until a device reports its own
@@ -200,7 +200,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("iPhone Mirror")
+        self.setWindowTitle("Mirror my iPhone")
         self.settings = QSettings(str(paths.SETTINGS_FILE), QSettings.Format.IniFormat)
 
         # Core components
@@ -346,7 +346,7 @@ class MainWindow(QMainWindow):
         help_menu.addAction(self._action(
             "Show Log in Finder", lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(paths.LOG_DIR)))))
         help_menu.addAction(self._action(
-            "iPhone Mirror on GitHub", lambda: QDesktopServices.openUrl(QUrl(paths.HOMEPAGE))))
+            "Mirror my iPhone on GitHub", lambda: QDesktopServices.openUrl(QUrl(paths.HOMEPAGE))))
 
     def _setup_statusbar(self):
         statusbar = QStatusBar()
