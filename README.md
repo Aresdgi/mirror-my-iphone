@@ -43,12 +43,12 @@ That's what Apple's iPhone Mirroring shows across the EU, where Apple has switch
 - **Guided setup:** the Doctor checks your iPhone and Mac and shows how to fix anything missing, often with one click
 - **Private and free:** everything stays on your Mac and the USB cable; no account, no telemetry, MIT licensed
 
-| | Mirror my iPhone | Apple iPhone Mirroring | QuickTime / AirPlay |
-|---|---|---|---|
-| Works in the EU | ✅ | ❌ | ✅ |
-| Control with mouse and trackpad | ✅ | ✅ | ❌ View only |
-| Connection | USB | Wireless | USB / Wi-Fi |
-| Price | Free, open source | Built in | Built in |
+| | Mirror my iPhone | Apple iPhone Mirroring |
+|---|---|---|
+| Works in the EU | ✅ | ❌ |
+| Control with mouse and trackpad | ✅ | ✅ |
+| Connection | USB | Wireless |
+| Price | Free, open source | Built in |
 
 ## FAQ
 
