@@ -180,3 +180,7 @@ claude mcp add mirror-my-iphone -- "$PWD/.venv/bin/python3" "$PWD/cli.py" mcp
 ```
 
 `packaging/build_app.sh` builds `dist/Mirror my iPhone.app` and its zip. The app's Python environment lives outside the bundle: in the Caskroom for Homebrew installs, otherwise in `~/Library/Application Support/Mirror my iPhone/venv`. To release, bump `__version__` in `version.py`, commit, and run `packaging/release.sh`; it builds the zip, updates `Casks/mirror-my-iphone.rb`, pushes and creates the GitHub release. This repository is its own Homebrew tap.
+
+## Credits
+
+This project started from [Dennisjoch/iPhoneMirroring](https://github.com/Dennisjoch/iPhoneMirroring) by Dennis Joch, an open-source alternative to Apple's iPhone Mirroring. Thanks to Dennis for the original work it was built on.
