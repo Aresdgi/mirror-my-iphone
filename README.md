@@ -16,7 +16,15 @@ cp -R "dist/Mirror my iPhone.app" /Applications/
 open "/Applications/Mirror my iPhone.app"
 ```
 
-The first launch takes about a minute to set itself up. Plug in your iPhone, tap **Trust**, and allow camera access when macOS asks (that's how the iPhone's screen reaches your Mac). The built-in Doctor walks you through the rest. A Homebrew install is coming soon.
+The first launch takes about a minute to set itself up. Plug in your iPhone, tap **Trust**, and allow camera access when macOS asks (that's how the iPhone's screen reaches your Mac). The built-in Doctor walks you through the rest.
+
+Or install it with Homebrew (this adds the repo as a tap; Homebrew 7 asks you to trust third-party taps):
+
+```bash
+brew tap bhuwanadhikari/mirror-my-iphone https://github.com/bhuwanadhikari/mirror-my-iphone
+brew trust bhuwanadhikari/mirror-my-iphone
+brew install --cask mirror-my-iphone
+```
 
 ## Let Claude use your iPhone
 

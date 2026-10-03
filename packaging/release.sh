@@ -35,4 +35,4 @@ git commit -m "Mirror my iPhone $VERSION" -- "$CASK"
 git push
 gh release create "v$VERSION" "$ZIP" --target "$(git rev-parse HEAD)" \
     --title "Mirror my iPhone $VERSION" --generate-notes
-echo "Published. Install with: brew install --cask bhuwanadhikari/mirror-my-iphone/mirror-my-iphone"
+echo "Published. Install with: brew tap bhuwanadhikari/mirror-my-iphone https://github.com/bhuwanadhikari/mirror-my-iphone && brew trust bhuwanadhikari/mirror-my-iphone && brew install --cask mirror-my-iphone"
