@@ -6,6 +6,7 @@
 #   1. bump __version__ in version.py and commit
 #   2. packaging/release.sh
 #
+# RELEASE_YES=1 skips the confirmation (packaging/publish.sh sets it).
 # Needs the GitHub CLI (`brew install gh`, then `gh auth login`).
 set -euo pipefail
 
@@ -28,8 +29,10 @@ fi
 
 sed -i '' -e "s/^  version \".*\"/  version \"$VERSION\"/" -e "s/^  sha256 \".*\"/  sha256 \"$SHA\"/" "$CASK"
 git diff --stat
-read -r -p "Commit the cask, push, and publish release v$VERSION on GitHub? [y/N] " answer
-[ "$answer" = y ] || [ "$answer" = Y ] || { git checkout -- "$CASK"; echo "Cancelled."; exit 1; }
+if [ -z "${RELEASE_YES:-}" ]; then
+    read -r -p "Commit the cask, push, and publish release v$VERSION on GitHub? [y/N] " answer
+    [ "$answer" = y ] || [ "$answer" = Y ] || { git checkout -- "$CASK"; echo "Cancelled."; exit 1; }
+fi
 
 git commit -m "Mirror my iPhone $VERSION" -- "$CASK"
 git push
