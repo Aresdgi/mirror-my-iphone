@@ -1,6 +1,6 @@
 cask "mirror-my-iphone" do
   version "0.2.0"
-  sha256 "b5b0a116459eb613d55308ec5516afa9f6781e2224c34f3134dc3370083dc3d0"
+  sha256 "57a915a7b1e9b52fd72223e4d444e5009c3ff4e3d79df334c3be2af3efbdeb5f"
 
   url "https://github.com/bhuwanadhikari/Mirror-my-iPhone/releases/download/v#{version}/Mirror-my-iPhone-#{version}.zip"
   name "Mirror my iPhone"
