@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
 )
 
 import paths
+from agent_api import AgentAPI
 from device_manager import ConnectionState, DeviceManager
 from doctor_panel import DoctorPanel
 from input_handler import InputHandler
@@ -30,6 +31,7 @@ from settings_panel import SettingsPanel
 logger = logging.getLogger(__name__)
 
 BACKGROUND = QColor(30, 30, 30)
+AGENT_TOUCH = QColor(10, 132, 255)  # touches sent through the agent API
 
 
 class ScreenView(QWidget):
@@ -42,6 +44,9 @@ class ScreenView(QWidget):
         self._scaled: QImage | None = None
         self._points = QSizeF(393, 852)  # iPhone screen in points
         self._touch: list[QPointF] = []  # current press/drag, for the touch indicator
+        self._agent_touch: list[QPointF] = []  # last gesture from the agent API, in iPhone points
+        self._agent_touch_timer = QTimer(self, singleShot=True, interval=600)
+        self._agent_touch_timer.timeout.connect(lambda: self.show_agent_touch([]))
         self._message = ""
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -56,6 +61,13 @@ class ScreenView(QWidget):
         """Show a new frame. Qt coalesces update() calls, so painting never falls behind the stream."""
         self._frame = image
         self._scaled = None
+        self.update()
+
+    def show_agent_touch(self, points: list):
+        """Briefly mark where an agent touched (`points` in iPhone points; a swipe has two)."""
+        self._agent_touch = points
+        if points:
+            self._agent_touch_timer.start()
         self.update()
 
     @property
@@ -123,13 +135,23 @@ class ScreenView(QWidget):
             painter.fillPath(outside.subtracted(screen), BACKGROUND)
 
         if self._touch:
-            painter.setPen(QPen(QColor(255, 255, 255, 110), 4, Qt.PenStyle.SolidLine,
-                                Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
-            if len(self._touch) > 1:
-                painter.drawPolyline(self._touch)
-            painter.setPen(QPen(QColor(255, 255, 255, 200), 1.5))
-            painter.setBrush(QColor(255, 255, 255, 90))
-            painter.drawEllipse(self._touch[-1], 14, 14)
+            self._draw_touch(painter, self._touch, QColor(255, 255, 255))
+        if self._agent_touch:
+            self._draw_touch(painter, [self._from_points(p) for p in self._agent_touch], AGENT_TOUCH)
+
+    @staticmethod
+    def _draw_touch(painter: QPainter, path: list[QPointF], color: QColor):
+        """A finger's path and a circle where it is (or was last)."""
+        trail, outline, fill = QColor(color), QColor(color), QColor(color)
+        trail.setAlpha(110)
+        outline.setAlpha(200)
+        fill.setAlpha(90)
+        painter.setPen(QPen(trail, 4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        if len(path) > 1:
+            painter.drawPolyline(path)
+        painter.setPen(QPen(outline, 1.5))
+        painter.setBrush(fill)
+        painter.drawEllipse(path[-1], 14, 14)
 
     # --- Mouse → touch ---
 
@@ -142,6 +164,12 @@ class ScreenView(QWidget):
             return None
         rel_x, rel_y = min(max(rel_x, 0.0), 1.0), min(max(rel_y, 0.0), 1.0)
         return QPointF(round(rel_x * self._points.width(), 1), round(rel_y * self._points.height(), 1))
+
+    def _from_points(self, point: QPointF) -> QPointF:
+        """Map iPhone points to a widget position."""
+        rect = self._image_rect()
+        return QPointF(rect.x() + point.x() / self._points.width() * rect.width(),
+                       rect.y() + point.y() / self._points.height() * rect.height())
 
     def mousePressEvent(self, event):
         # Also receives the second press of a double click (QWidget's default mouseDoubleClickEvent)
@@ -206,6 +234,7 @@ class MainWindow(QMainWindow):
         # Core components
         self.device_manager = DeviceManager(self)
         self.input_handler = InputHandler(self)
+        self.agent_api = AgentAPI(self.device_manager, self.input_handler, lambda: self._screen_points, self)
         self.capture_thread = None
         self._capture_mode = ""
         self._screen_points = self.DEFAULT_SCREEN
@@ -232,9 +261,10 @@ class MainWindow(QMainWindow):
         self._apply_zoom()
         self._restore_sidebar()
 
-        # Start device discovery
+        # Start device discovery and the agent API
         enable_video_capture()
         self.device_manager.start_discovery()
+        self.agent_api.start()
         QTimer.singleShot(0, self._run_doctor_on_first_launch)
 
     # --- UI setup ---
@@ -369,6 +399,7 @@ class MainWindow(QMainWindow):
         self.device_manager.wda_state_changed.connect(lambda *_: self._update_banner())
         self.input_handler.wda_status_changed.connect(self._on_wda_status)
         self.doctor_panel.wda_downloaded.connect(self._on_wda_downloaded)
+        self.agent_api.gesture_sent.connect(self.screen_view.show_agent_touch)
         self._battery_ready.connect(self._battery_label.setText)
 
     # --- Window size ---
@@ -481,6 +512,7 @@ class MainWindow(QMainWindow):
 
     def _on_device_disconnected(self):
         self._stop_capture()
+        self.agent_api.clear_frame()
         self.input_handler.forget_wda()
         self._battery_timer.stop()
         self._wda_retry_timer.stop()
@@ -533,12 +565,15 @@ class MainWindow(QMainWindow):
             self._last_frame_size = image.size()
             self._update_screen_points(image.size())
         self.screen_view.update_frame(image)
+        self.agent_api.set_frame(image)
 
     def _on_fps(self, fps: float):
         self._fps_label.setText(f"{fps:.0f} FPS ({self._capture_mode})")
+        self.agent_api.fps = fps
 
     def _on_capture_mode(self, mode: str):
         self._capture_mode = mode
+        self.agent_api.capture_mode = mode
 
     def _on_capture_error(self, msg: str):
         logger.warning(f"Capture error: {msg}")
@@ -632,6 +667,7 @@ class MainWindow(QMainWindow):
     # --- Window lifecycle ---
 
     def closeEvent(self, event):
+        self.agent_api.stop()
         self._stop_capture()
         self.input_handler.cleanup()
         self.device_manager.cleanup()

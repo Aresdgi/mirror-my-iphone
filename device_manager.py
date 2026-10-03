@@ -290,6 +290,29 @@ class DeviceManager(QObject):
             logger.debug(f"Battery info failed: {e}")
             return {'level': -1, 'charging': False}
 
+    def list_apps(self) -> list[dict]:
+        """Installed apps, except hidden ones: [{'bundle_id', 'name', 'type'}], sorted by name. Raises on failure."""
+        from pymobiledevice3.services.installation_proxy import InstallationProxyService
+
+        async def query():
+            async with InstallationProxyService(self._lockdown) as proxy:
+                return await proxy.browse({'ApplicationType': 'Any'}, attributes=[
+                    'CFBundleIdentifier', 'CFBundleDisplayName', 'CFBundleName', 'ApplicationType', 'SBAppTags',
+                ])
+
+        if self._lockdown is None:
+            raise ConnectionError("no iPhone connected")
+        apps = [
+            {
+                'bundle_id': app['CFBundleIdentifier'],
+                'name': app.get('CFBundleDisplayName') or app.get('CFBundleName') or app['CFBundleIdentifier'],
+                'type': (app.get('ApplicationType') or '').lower(),
+            }
+            for app in self._run(query(), timeout=20)
+            if app.get('CFBundleIdentifier') and 'hidden' not in (app.get('SBAppTags') or [])
+        ]
+        return sorted(apps, key=lambda app: app['name'].lower())
+
     def get_orientation(self) -> int:
         """Get screen orientation (1=portrait, 2=upside-down, 3=landscape-left, 4=landscape-right)."""
         from pymobiledevice3.services.springboard import SpringBoardServicesService

@@ -9,17 +9,20 @@ sent through the WebDriverAgent (WDA) HTTP API.
     scroll / trackpad  → short swipes in the scroll direction
 
 Positions arrive in iPhone points (ScreenView maps them). WDA requests run one at a time,
-in order, on a worker thread, so the UI never waits for the device.
+in order, on a worker thread, so the UI never waits for the device. Each queued request returns
+a Future, which the agent API (agent_api.py) waits on; the UI ignores it.
 
 Every gesture is sent as W3C actions. WDA reads the foreground app's accessibility tree once
 per touch point to place it, so the fewer points a gesture has, the sooner it runs.
 """
 
+import base64
 import logging
 import math
 import queue
 import threading
 import time
+from concurrent.futures import Future
 from enum import Enum
 
 import requests
@@ -36,6 +39,12 @@ class WDAError(Exception):
 
 class WDAClient:
     """Minimal WebDriverAgent client. Gestures are queued and sent in order on one worker thread."""
+
+    SNAPSHOT_DEPTH = 50  # WDA's default, for requests that need the accessibility tree
+    # Attributes ui_tree() leaves out: working out visibility and accessibility made it 6x slower
+    # (10 s for the Home Screen), and the agent API filters by frame instead
+    UI_TREE_EXCLUDED = ('visible,accessible,nativeAccessibilityElement,traits,nativeFrame,frame,focused,'
+                        'placeholderValue,minValue,maxValue')
 
     def __init__(self, base_url: str = f'http://127.0.0.1:{paths.WDA_PORT}', on_disconnect=None):
         self.base_url = base_url
@@ -113,47 +122,72 @@ class WDAClient:
 
     def _run_actions(self):
         while True:
-            name, call = self._actions.get()
+            name, call, future = self._actions.get()
             had_session = self.session_id is not None
             try:
                 started = time.monotonic()
-                call()
+                future.set_result(call())
                 logger.debug(f"WDA {name} took {(time.monotonic() - started) * 1000:.0f} ms")
             except WDAError as e:
                 logger.warning(f"WDA {name} failed: {e}")
+                future.set_exception(e)
             except requests.ConnectionError:
                 logger.error(f"WDA connection lost during {name}")
                 self.session_id = None
+                future.set_exception(WDAError("lost the connection to WebDriverAgent"))
             except Exception as e:
                 logger.error(f"WDA {name} failed: {e}")
+                future.set_exception(e)
             finally:
                 self._actions.task_done()
             if had_session and self.session_id is None and self._on_disconnect:
                 self._on_disconnect()
 
-    def _enqueue(self, name: str, *args, **kwargs):
-        self._actions.put((name, lambda: self._call(*args, **kwargs)))
+    def _submit(self, name: str, call) -> Future:
+        """Queue `call` for the worker thread. The Future holds its result or exception."""
+        future = Future()
+        self._actions.put((name, call, future))
+        return future
 
-    def _touch(self, name: str, actions: list[dict], timeout: float = 15):
+    def _enqueue(self, name: str, *args, **kwargs) -> Future:
+        return self._submit(name, lambda: self._call(*args, **kwargs))
+
+    def _touch(self, name: str, actions: list[dict], timeout: float = 15) -> Future:
         """Queue one finger's W3C actions. Taps go this way too: /wda/tap and its siblings
         place the touch point four or five times over, each time with a snapshot."""
         payload = {'actions': [{
             'type': 'pointer', 'id': 'finger1', 'parameters': {'pointerType': 'touch'}, 'actions': actions,
         }]}
-        self._enqueue(name, 'POST', '/actions', payload, timeout=timeout)
+        return self._enqueue(name, 'POST', '/actions', payload, timeout=timeout)
+
+    def _with_snapshots(self, call):
+        """Wrap `call` to run with accessibility snapshots, which connect() turns off for gestures."""
+        def run():
+            self._call('POST', '/appium/settings', {'settings': {'snapshotMaxDepth': self.SNAPSHOT_DEPTH}})
+            try:
+                return call()
+            finally:
+                self._call('POST', '/appium/settings', {'settings': {'snapshotMaxDepth': 0}})
+        return run
 
     # --- Gestures (non-blocking; coordinates in points) ---
 
     TAP_MS = 50  # how long the finger stays down in a tap
+    DOUBLE_TAP_GAP_MS = 100  # between the two taps of a double tap
 
-    def tap(self, x: float, y: float):
-        self._touch('tap', [_move(x, y), _DOWN, _pause(self.TAP_MS), _UP])
+    def tap(self, x: float, y: float) -> Future:
+        return self._touch('tap', [_move(x, y), _DOWN, _pause(self.TAP_MS), _UP])
 
-    def long_press(self, x: float, y: float, duration: float = 1.0):
-        self._touch('long press', [_move(x, y), _DOWN, _pause(round(duration * 1000)), _UP],
-                    timeout=duration + 15)
+    def double_tap(self, x: float, y: float) -> Future:
+        """Both taps in one gesture, so iOS sees them close enough together to count as a double tap."""
+        tap = [_DOWN, _pause(self.TAP_MS), _UP]
+        return self._touch('double tap', [_move(x, y), *tap, _pause(self.DOUBLE_TAP_GAP_MS), *tap])
 
-    def swipe(self, path: list[tuple[float, float, float]]):
+    def long_press(self, x: float, y: float, duration: float = 1.0) -> Future:
+        return self._touch('long press', [_move(x, y), _DOWN, _pause(round(duration * 1000)), _UP],
+                           timeout=duration + 15)
+
+    def swipe(self, path: list[tuple[float, float, float]]) -> Future:
         """Move a finger along (x, y, seconds) samples, in straight lines between them."""
         (x0, y0, t0), rest = path[0], path[1:]
         actions = [_move(x0, y0), _DOWN]
@@ -162,17 +196,42 @@ class WDAClient:
             actions.append(_move(x, y, max(1, round((t - previous) * 1000))))
             previous = t
         actions.append(_UP)
-        self._touch('swipe', actions, timeout=(previous - t0) + 15)
+        return self._touch('swipe', actions, timeout=(previous - t0) + 15)
 
-    def press_button(self, name: str):
+    def press_button(self, name: str) -> Future:
         """'home', 'volumeUp' or 'volumeDown'."""
-        self._enqueue(f'{name} button', 'POST', '/wda/pressButton', {'name': name})
+        return self._enqueue(f'{name} button', 'POST', '/wda/pressButton', {'name': name})
 
-    def home_screen(self):
-        self._enqueue('home', 'POST', '/wda/homescreen', {}, session=False)
+    def home_screen(self) -> Future:
+        return self._enqueue('home', 'POST', '/wda/homescreen', {}, session=False)
 
-    def lock(self):
-        self._enqueue('lock', 'POST', '/wda/lock', {}, session=False)
+    def lock(self) -> Future:
+        return self._enqueue('lock', 'POST', '/wda/lock', {}, session=False)
+
+    # --- For the agent API (non-blocking) ---
+
+    def type_text(self, text: str) -> Future:
+        """Type into the focused text field. WDA finds the keyboard through a snapshot."""
+        return self._submit('type', self._with_snapshots(
+            lambda: self._call('POST', '/wda/keys', {'value': list(text)}, timeout=30 + len(text) / 5)))
+
+    def activate_app(self, bundle_id: str) -> Future:
+        """Bring the app to the front, launching it if needed (without restarting it)."""
+        return self._enqueue('open app', 'POST', '/wda/apps/activate', {'bundleId': bundle_id}, timeout=30)
+
+    def ui_tree(self) -> Future:
+        """The foreground app's accessibility tree, as WDA's JSON source."""
+        return self._submit('ui tree', self._with_snapshots(lambda: self._call(
+            'GET', f'/source?format=json&excluded_attributes={self.UI_TREE_EXCLUDED}', timeout=60)))
+
+    def active_app(self) -> Future:
+        """The foreground app: {'bundleId', 'name', 'pid', ...}."""
+        return self._enqueue('active app', 'GET', '/wda/activeAppInfo', session=False)
+
+    def screenshot(self) -> Future:
+        """PNG of the screen in pixels."""
+        return self._submit('screenshot', lambda: base64.b64decode(
+            self._call('GET', '/screenshot', session=False, timeout=15)))
 
     def get_battery_info(self) -> dict:
         """Blocking — call off the UI thread."""

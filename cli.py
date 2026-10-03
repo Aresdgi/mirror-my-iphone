@@ -6,9 +6,21 @@ mirror-my-iphone — command-line companion of the Mirror my iPhone app.
     mirror-my-iphone doctor     check the prerequisites and explain how to fix what's missing
     mirror-my-iphone tunnel     run the developer tunnel in this terminal (iOS 17+, needs sudo)
     mirror-my-iphone logs       follow the app's log
+
+Control the iPhone through the running app (for scripts and AI agents; see agent_api.py):
+
+    mirror-my-iphone screenshot [FILE]      save the screen, one pixel per iPhone point
+    mirror-my-iphone ui                     list the elements on screen and where to tap them
+    mirror-my-iphone tap X Y                also: double-tap, long-press, swipe X1 Y1 X2 Y2
+    mirror-my-iphone type TEXT              type into the focused text field
+    mirror-my-iphone button NAME            home, lock, volume-up or volume-down
+    mirror-my-iphone apps / open-app ID     list apps / open one by bundle ID
+    mirror-my-iphone info                   device, screen size and status
+    mirror-my-iphone mcp                    MCP server on stdio, for Claude Code and other agents
 """
 
 import argparse
+import json
 import os
 import shlex
 import shutil
@@ -90,6 +102,62 @@ def cmd_logs(_args) -> int:
     os.execvp('tail', ['tail', '-n', '200', '-F', str(paths.LOG_FILE)])
 
 
+def cmd_mcp(_args) -> int:
+    import mcp_server
+    return mcp_server.serve()
+
+
+def _agent(call) -> int:
+    """Run `call(client)`, print what it returns, and turn agent API errors into an exit code."""
+    from agent_client import AgentAPIError, AgentClient
+    try:
+        output = call(AgentClient())
+    except AgentAPIError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    if output:
+        print(output)
+    return 0
+
+
+def cmd_screenshot(args) -> int:
+    def save(client):
+        fmt = 'jpeg' if args.file.lower().endswith(('.jpg', '.jpeg')) else 'png'
+        image, headers = client.screenshot(scale=args.scale, format=fmt)
+        with open(args.file, 'wb') as file:
+            file.write(image)
+        points = headers.get('X-Screen-Points', '?').replace('x', ' × ')
+        return f"Saved {args.file} (screen {points} points, {args.scale:g} pixel{'s' * (args.scale != 1)} per point)"
+    return _agent(save)
+
+
+def cmd_ui(args) -> int:
+    from agent_client import describe_ui
+    return _agent(lambda client: (json.dumps if args.json else describe_ui)(client.get('/v1/ui')))
+
+
+def cmd_gesture(args) -> int:
+    """tap, double-tap, long-press, swipe, type, button and open-app: POST to the endpoint of that name."""
+    fields = ('x', 'y', 'x1', 'y1', 'x2', 'y2', 'duration', 'text', 'name', 'bundle_id')
+    body = {key: value for key, value in vars(args).items() if key in fields and value is not None}
+    if 'name' in body:
+        body['name'] = body['name'].replace('-', '_')
+    endpoint = '/v1/' + args.command.replace('-', '_')
+
+    def send(client):
+        client.post(endpoint, **body)
+    return _agent(send)
+
+
+def cmd_apps(_args) -> int:
+    from agent_client import describe_apps
+    return _agent(lambda client: describe_apps(client.get('/v1/apps')))
+
+
+def cmd_info(_args) -> int:
+    return _agent(lambda client: json.dumps(client.get('/v1/info'), indent=2))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog='mirror-my-iphone', description="Mirror and control your iPhone from your Mac.",
@@ -100,6 +168,40 @@ def main() -> int:
     commands.add_parser('doctor', help="check prerequisites").set_defaults(run=cmd_doctor)
     commands.add_parser('tunnel', help="run the developer tunnel (sudo)").set_defaults(run=cmd_tunnel)
     commands.add_parser('logs', help="follow the app's log").set_defaults(run=cmd_logs)
+
+    # Device control through the running app
+    screenshot = commands.add_parser('screenshot', help="save the iPhone's screen")
+    screenshot.add_argument('file', nargs='?', default='iphone-screenshot.png', help="PNG or JPEG file")
+    screenshot.add_argument('--scale', type=float, default=1.0, help="pixels per iPhone point (default 1)")
+    screenshot.set_defaults(run=cmd_screenshot)
+    ui = commands.add_parser('ui', help="list the elements on screen")
+    ui.add_argument('--json', action='store_true', help="print the API's JSON")
+    ui.set_defaults(run=cmd_ui)
+    for name, help_text in (('tap', "tap a point"), ('double-tap', "double-tap a point"),
+                            ('long-press', "touch and hold a point")):
+        gesture = commands.add_parser(name, help=help_text)
+        gesture.add_argument('x', type=float)
+        gesture.add_argument('y', type=float)
+        if name == 'long-press':
+            gesture.add_argument('--duration', type=float, help="seconds (default 1)")
+        gesture.set_defaults(run=cmd_gesture)
+    swipe = commands.add_parser('swipe', help="drag from one point to another")
+    for coordinate in ('x1', 'y1', 'x2', 'y2'):
+        swipe.add_argument(coordinate, type=float)
+    swipe.add_argument('--duration', type=float, help="seconds (default 0.4)")
+    swipe.set_defaults(run=cmd_gesture)
+    type_text = commands.add_parser('type', help="type into the focused text field")
+    type_text.add_argument('text')
+    type_text.set_defaults(run=cmd_gesture)
+    button = commands.add_parser('button', help="press a hardware button")
+    button.add_argument('name', choices=['home', 'lock', 'volume-up', 'volume-down'])
+    button.set_defaults(run=cmd_gesture)
+    open_app = commands.add_parser('open-app', help="open an app by bundle ID")
+    open_app.add_argument('bundle_id')
+    open_app.set_defaults(run=cmd_gesture)
+    commands.add_parser('apps', help="list the iPhone's apps").set_defaults(run=cmd_apps)
+    commands.add_parser('info', help="device, screen size and status").set_defaults(run=cmd_info)
+    commands.add_parser('mcp', help="run the MCP server on stdio").set_defaults(run=cmd_mcp)
     args = parser.parse_args()
     return getattr(args, 'run', cmd_open)(args)
 

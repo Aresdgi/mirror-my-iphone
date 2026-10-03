@@ -24,6 +24,10 @@ WDA_REPO = 'https://github.com/appium/WebDriverAgent.git'
 WDA_VERSION = 'v16.13.6'
 WDA_PORT = 8100
 
+# Agent API (agent_api.py): the app serves it on 127.0.0.1 and writes its port and token here
+API_PORT = 8101  # preferred; the app picks a free port when it's taken
+API_FILE = SUPPORT_DIR / 'api.json'
+
 # tunneld runs as root, so it logs to /tmp rather than into the user's Library
 TUNNELD_LOG = Path('/tmp/mirror-my-iphone-tunneld.log')
 

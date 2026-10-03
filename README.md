@@ -1,6 +1,6 @@
 # Mirror my iPhone
 
-**iPhone Mirroring for your Mac, even in the EU.** See your iPhone on your Mac at a smooth 60 FPS and use it with your mouse and trackpad: tap, swipe, scroll, Home, Lock and volume. Free and open source.
+**iPhone Mirroring for your Mac, even in the EU, and for your AI agents.** See your iPhone on your Mac at a smooth 60 FPS and use it with your mouse and trackpad. Or let Claude and other AI agents use it for you: they see the screen, tap, swipe and type through an MCP server, a CLI or a local HTTP API. Free and open source.
 
 <img src="assets/screenshots/mirror-my-iphone-on-mac.png" width="600" alt="Mirror my iPhone on a Mac, showing an iPhone 15 home screen at 59 FPS over USB, with the Doctor sidebar reporting that mirroring and touch control are ready">
 
@@ -18,6 +18,16 @@ open "/Applications/Mirror my iPhone.app"
 
 The first launch takes about a minute to set itself up. Plug in your iPhone, tap **Trust**, and allow camera access when macOS asks (that's how the iPhone's screen reaches your Mac). The built-in Doctor walks you through the rest. A Homebrew install is coming soon.
 
+## Let Claude use your iPhone
+
+Give Claude Code your iPhone with one command (the app must be open, with touch control ready):
+
+```bash
+claude mcp add --scope user mirror-my-iphone -- "/Applications/Mirror my iPhone.app/Contents/Resources/bin/mirror-my-iphone" mcp
+```
+
+Then ask something like *"Open Settings on my iPhone and turn on Dark Mode"*. Claude takes screenshots, reads what's on screen, and taps, swipes and types its way there, and you watch every touch on the mirrored screen as a blue dot. Claude Desktop, Cursor and other MCP clients use the same command. Agents without MCP can use the CLI (`mirror-my-iphone tap 196 400`) or the [HTTP API](#agent-api).
+
 ## "iPhone Mirroring is not available in your country or region"?
 
 <img src="assets/screenshots/iphone-mirroring-not-available-in-your-country-or-region.png" width="299" alt="macOS dialog: Unable to Connect to iPhone. iPhone Mirroring is not available in your country or region.">
@@ -29,6 +39,7 @@ That's what Apple's iPhone Mirroring shows across the EU, where Apple has switch
 - **Smooth 60 FPS:** scrolling, animations and videos look natural
 - **Full control:** click to tap, drag to swipe, scroll with the trackpad, click and hold for a long press
 - **Buttons and sound:** Home, Lock and volume from the toolbar or keyboard; iPhone audio plays on your Mac
+- **Built for AI agents:** Claude and other agents can see the screen, tap, swipe, type and open apps
 - **Guided setup:** the Doctor checks your iPhone and Mac and shows how to fix anything missing, often with one click
 - **Private and free:** everything stays on your Mac and the USB cable; no account, no telemetry, MIT licensed
 
@@ -52,6 +63,9 @@ No, it needs a USB cable that carries data.
 
 **Which Macs and iPhones does it work with?**
 Macs with macOS 13 Ventura or later (Apple silicon and Intel). Tested with an iPhone 15 on iOS 26 and macOS 26 Tahoe; any iPhone that QuickTime Player can show over USB should work.
+
+**Can Claude or another AI agent control my iPhone?**
+Yes. Mirror my iPhone includes an MCP server for Claude Code, Claude Desktop, Cursor and other MCP clients, plus a CLI and a local HTTP API. Agents get screenshots, a list of the elements on screen, and taps, swipes, typing, buttons and app launching. It's your phone, so the agent is told to ask before anything hard to undo, like sending messages or buying.
 
 **Can I type with my Mac keyboard?**
 Not yet, and double tap isn't supported either: a double click arrives as two separate taps.
@@ -86,9 +100,41 @@ The Doctor opens on first launch; run it again from Help › Run Doctor. Mirrori
 | ⌘0 / ⌘+ / ⌘− | Actual size / larger / smaller window |
 | ⌃⌘S | Show or hide the sidebar (Doctor, Settings, Logs) |
 
+### Agent API
+
+The app serves an HTTP API on `127.0.0.1` while it runs. The MCP server (`mirror-my-iphone mcp`) and the CLI's device commands are clients of it. Coordinates are iPhone points (393 × 852 on an iPhone 15), which are also the pixels of a default screenshot, with (0, 0) at the top left.
+
+| MCP tool | CLI | HTTP |
+|---|---|---|
+| `screenshot` | `screenshot [FILE] [--scale 3]` | `GET /v1/screenshot?scale=&format=png\|jpeg` |
+| `describe_ui` | `ui [--json]` | `GET /v1/ui`: elements with label, value and the point to tap |
+| `tap`, `double_tap` | `tap X Y`, `double-tap X Y` | `POST /v1/tap`, `/v1/double_tap` `{"x", "y"}` |
+| `long_press` | `long-press X Y [--duration S]` | `POST /v1/long_press` `{"x", "y", "duration"}` |
+| `swipe` | `swipe X1 Y1 X2 Y2 [--duration S]` | `POST /v1/swipe` `{"x1", "y1", "x2", "y2", "duration"}` |
+| `type_text` | `type TEXT` | `POST /v1/type` `{"text"}`, into the focused field; `\n` presses Return |
+| `press_button` | `button home\|lock\|volume-up\|volume-down` | `POST /v1/button` `{"name"}` |
+| `open_app`, `list_apps` | `open-app BUNDLE_ID`, `apps` | `POST /v1/open_app` `{"bundle_id"}`, `GET /v1/apps` |
+| `device_info` | `info` | `GET /v1/info` |
+
+Gestures return once the iPhone has performed them, and the next screenshot waits for the animation to settle. Every request needs the token from `~/Library/Application Support/Mirror my iPhone/api.json`, which only your user account can read. The API refuses requests from web pages.
+
+```bash
+API="$HOME/Library/Application Support/Mirror my iPhone/api.json"
+URL=$(plutil -extract url raw -o - "$API") TOKEN=$(plutil -extract token raw -o - "$API")
+curl -H "Authorization: Bearer $TOKEN" "$URL/v1/screenshot" -o screen.png
+curl -H "Authorization: Bearer $TOKEN" -d '{"x": 196, "y": 400}' "$URL/v1/tap"
+```
+
+For Claude Desktop, add the server to `claude_desktop_config.json`:
+
+```json
+{"mcpServers": {"mirror-my-iphone": {
+  "command": "/Applications/Mirror my iPhone.app/Contents/Resources/bin/mirror-my-iphone", "args": ["mcp"]}}}
+```
+
 ### Limitations
 
-- The iPhone's screen has to be on; the picture pauses while it sleeps. Raise Settings › Display & Brightness › Auto-Lock to keep it awake.
+- The iPhone's screen has to be on; the picture pauses while it sleeps (agents are told when a screenshot is stale). Raise Settings › Display & Brightness › Auto-Lock to keep it awake.
 - A swipe plays on the iPhone when you release the mouse: WebDriverAgent only accepts whole gestures.
 - With a free Apple ID, the WebDriverAgent signing profile lasts 7 days; the app signs it again automatically.
 
@@ -96,6 +142,7 @@ The Doctor opens on first launch; run it again from Help › Run Doctor. Mirrori
 
 - **Screen:** an AVFoundation USB video stream at up to 60 FPS, the same one QuickTime Player records. While it runs, iOS shows a clean status bar (09:41, full battery) and may route its audio to the Mac. Fallback: the DVT Screenshot Service over pymobiledevice3 (~20 FPS; needs the developer tunnel on iOS 17+).
 - **Touch:** mouse positions are converted to iPhone points and sent as W3C actions to [WebDriverAgent](https://github.com/appium/WebDriverAgent) (port 8100), which the app builds and runs with `xcodebuild`, signed with the first Apple ID in Xcode.
+- **Agents:** the agent API runs inside the app on 127.0.0.1:8101 (or a free port, written to `api.json`). Agent gestures share WebDriverAgent's queue with your mouse; screenshots come from the same video stream you see.
 - **USB:** pymobiledevice3 (usbmux and lockdown). **UI:** PyQt6, run in the app's own process by a small native launcher.
 
 ### Troubleshooting
@@ -116,7 +163,7 @@ rm -rf "/Applications/Mirror my iPhone.app" && cp -R "dist/Mirror my iPhone.app"
 # Uninstall (then delete WebDriverAgentRunner from the iPhone)
 rm -rf "/Applications/Mirror my iPhone.app" "$HOME/Library/Application Support/Mirror my iPhone" "$HOME/Library/Logs/Mirror my iPhone"
 
-# Optional: the mirror-my-iphone command (doctor, tunnel, logs)
+# Optional: the mirror-my-iphone command (doctor, logs, and device control for scripts and agents)
 sudo mkdir -p /usr/local/bin
 sudo ln -sf "/Applications/Mirror my iPhone.app/Contents/Resources/bin/mirror-my-iphone" /usr/local/bin/mirror-my-iphone
 ```
@@ -129,6 +176,7 @@ Run from source without building the app (macOS then asks for camera access for 
 bash setup.sh                 # creates .venv and installs the dependencies
 .venv/bin/python3 main.py     # the app
 .venv/bin/python3 cli.py doctor
+claude mcp add mirror-my-iphone -- "$PWD/.venv/bin/python3" "$PWD/cli.py" mcp
 ```
 
 `packaging/build_app.sh` builds `dist/Mirror my iPhone.app` and its zip. The app's Python environment lives outside the bundle: in the Caskroom for Homebrew installs, otherwise in `~/Library/Application Support/Mirror my iPhone/venv`. To release, bump `__version__` in `version.py`, commit, and run `packaging/release.sh`; it builds the zip, updates `Casks/mirror-my-iphone.rb`, pushes and creates the GitHub release. This repository is its own Homebrew tap.
