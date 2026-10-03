@@ -216,6 +216,37 @@ class ScreenView(QWidget):
         self._input.scroll(point, delta)
 
 
+class Spinner(QWidget):
+    """A small rotating arc, animated only while it's visible."""
+
+    def __init__(self, size: int = 14, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(size, size)
+        self._angle = 0
+        self._timer = QTimer(self, interval=30)
+        self._timer.timeout.connect(self._step)
+
+    def _step(self):
+        self._angle = (self._angle + 12) % 360
+        self.update()
+
+    def showEvent(self, event):
+        self._timer.start()
+        super().showEvent(event)
+
+    def hideEvent(self, event):
+        self._timer.stop()
+        super().hideEvent(event)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(QColor('white'), 2)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        painter.drawArc(QRectF(self.rect()).adjusted(1.5, 1.5, -1.5, -1.5), -self._angle * 16, 270 * 16)
+
+
 class MainWindow(QMainWindow):
     """Main application window for Mirror my iPhone."""
 
@@ -270,10 +301,18 @@ class MainWindow(QMainWindow):
     # --- UI setup ---
 
     def _setup_ui(self):
-        self._banner = QLabel()
-        self._banner.setWordWrap(True)
+        self._banner = QFrame(objectName='banner')
+        self._banner.setStyleSheet("#banner { background: #d70015; border: 2px solid #ff6961; border-radius: 6px; }"
+                                   "QLabel { color: white; background: transparent; font-size: 12pt; }")
+        self._banner_spinner = Spinner()
+        self._banner_text = QLabel(wordWrap=True)
+        self._banner_text.linkActivated.connect(lambda _: self.show_tab(self.doctor_panel))
+        row = QHBoxLayout(self._banner)
+        row.setContentsMargins(10, 8, 10, 8)
+        row.setSpacing(8)
+        row.addWidget(self._banner_spinner, alignment=Qt.AlignmentFlag.AlignTop)
+        row.addWidget(self._banner_text, stretch=1)
         self._banner.setVisible(False)
-        self._banner.linkActivated.connect(lambda _: self.show_tab(self.doctor_panel))
 
         phone = QWidget()
         column = QVBoxLayout(phone)
@@ -613,20 +652,19 @@ class MainWindow(QMainWindow):
     def _update_banner(self):
         """Explain why touch control isn't available (yet)."""
         state, message = self.device_manager.wda_state
+        waiting = False  # the spinner only shows while something is in progress, not when it needs a fix
         if self.input_handler.wda.is_connected or not self.device_manager.is_connected:
-            text, style = None, None
+            text = None
         elif state in ('failed', 'unavailable'):
-            text, style = (f"<b>Touch control unavailable.</b> {message} "
-                           "<a href='#' style='color: #ffd60a;'>Open Doctor</a>",
-                           "background: #5c4a1a; color: #ffe8a3;")
+            text = (f"⚠ <b>Touch control unavailable.</b> {message} "
+                    "<a href='#' style='color: #ffd60a; font-weight: bold;'>Open Doctor</a>")
         elif state == 'running':
-            text, style = "Touch control: connecting to WebDriverAgent…", "background: #2d3a4f; color: #c9d7ec;"
+            text, waiting = "<b>Touch not ready</b> — connecting to WebDriverAgent…", True
         else:
-            text, style = (f"Touch control: {message or 'starting WebDriverAgent…'}",
-                           "background: #2d3a4f; color: #c9d7ec;")
+            text, waiting = f"<b>Touch not ready</b> — {message or 'starting WebDriverAgent…'}", True
         if text:
-            self._banner.setText(text)
-            self._banner.setStyleSheet(f"{style} border-radius: 6px; padding: 6px 8px; font-size: 11pt;")
+            self._banner_text.setText(text)
+            self._banner_spinner.setVisible(waiting)
         if bool(text) != self._banner.isVisible():
             self._banner.setVisible(bool(text))
             QTimer.singleShot(0, self._apply_zoom)  # the banner takes height from the phone
