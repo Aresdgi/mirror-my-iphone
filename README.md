@@ -4,6 +4,8 @@
 
 <img src="assets/screenshots/mirror-my-iphone-on-mac.png" width="600" alt="Mirror my iPhone on a Mac, showing an iPhone 15 home screen at 59 FPS over USB, with the Doctor sidebar reporting that mirroring and touch control are ready">
 
+<img src="assets/screenshots/demo.webp" width="800" alt="Demo: an iPhone next to its live mirror on a Mac, with the mirrored screen following every tap">
+
 ## Install
 
 You need a Mac with macOS 13 or later, an iPhone with a USB data cable, Xcode (or just `xcode-select --install`) and Python 3.10+ (`brew install python@3.12`).
