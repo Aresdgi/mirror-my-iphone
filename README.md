@@ -183,4 +183,4 @@ claude mcp add mirror-my-iphone -- "$PWD/.venv/bin/python3" "$PWD/cli.py" mcp
 
 ## Credits
 
-This project started from [Dennisjoch/iPhoneMirroring](https://github.com/Dennisjoch/iPhoneMirroring) by Dennis Joch, an open-source alternative to Apple's iPhone Mirroring. Thanks to Dennis for the original work it was built on.
+This project started from [iPhoneMirroring](https://github.com/Dennisjoch/iPhoneMirroring), an open-source alternative to Apple's iPhone Mirroring.
