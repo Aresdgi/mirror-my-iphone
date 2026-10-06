@@ -18,7 +18,7 @@ DEFAULT_VENV="$HOME/Library/Application Support/Mirror my iPhone/venv"
 for VENV in "${MIRROR_MY_IPHONE_VENV:-}" "/opt/homebrew/Caskroom/mirror-my-iphone/$VERSION/venv" \
     "/usr/local/Caskroom/mirror-my-iphone/$VERSION/venv" "$DEFAULT_VENV"; do
     [ -n "$VENV" ] && [ -x "$VENV/bin/python3" ] \
-        && cmp -s "$RESOURCES/app/requirements.txt" "$VENV/.requirements.txt" && break
+        && cmp -s "$RESOURCES/app/requirements.lock" "$VENV/.requirements.lock" && break
     VENV=""
 done
 if [ -z "$VENV" ]; then

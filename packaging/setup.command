@@ -14,7 +14,7 @@ if "$RESOURCES/bootstrap.sh"; then
     open "$APP"
 else
     echo
-    echo "Setup failed — see the messages above. Python 3.10+ is required:"
+    echo "Setup failed — see the messages above. Python 3.12 is required:"
     echo "  brew install python@3.12"
     echo
     read -n 1 -s -r -p "Press any key to close."

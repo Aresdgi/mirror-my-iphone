@@ -9,20 +9,17 @@ echo ""
 
 # Check Python version
 PYTHON=""
-for cmd in python3.12 python3.11 python3.10 python3; do
-    if command -v "$cmd" &> /dev/null; then
-        version=$("$cmd" --version 2>&1 | grep -oE '[0-9]+\.[0-9]+')
-        major=$(echo "$version" | cut -d. -f1)
-        minor=$(echo "$version" | cut -d. -f2)
-        if [ "$major" -ge 3 ] && [ "$minor" -ge 10 ]; then
-            PYTHON="$cmd"
-            break
-        fi
+# requirements.lock is resolved for Python 3.12, so only 3.12 will do
+for cmd in /opt/homebrew/opt/python@3.12/bin/python3.12 /usr/local/opt/python@3.12/bin/python3.12 python3.12; do
+    if command -v "$cmd" &> /dev/null \
+        && "$cmd" -c 'import sys; sys.exit(sys.version_info[:2] != (3, 12))' 2> /dev/null; then
+        PYTHON="$cmd"
+        break
     fi
 done
 
 if [ -z "$PYTHON" ]; then
-    echo "ERROR: Python 3.10+ is required but not found."
+    echo "ERROR: Python 3.12 is required but not found."
     echo "Install it via: brew install python@3.12"
     exit 1
 fi
@@ -39,8 +36,10 @@ fi
 
 # Install dependencies
 echo "[3/3] Installing dependencies..."
-"$VENV_DIR/bin/pip" install --upgrade pip -q
-"$VENV_DIR/bin/pip" install -r "$SCRIPT_DIR/requirements.txt" -q
+# Only the exact files pinned in the lock files (by SHA-256); see packaging/bootstrap.sh
+"$VENV_DIR/bin/python3" -m pip install --disable-pip-version-check --quiet --require-hashes --no-deps --only-binary=:all: -r "$SCRIPT_DIR/requirements-build.lock"
+"$VENV_DIR/bin/python3" -m pip install --disable-pip-version-check --quiet --require-hashes --no-deps --only-binary=:all: --no-binary=hexdump \
+    --no-build-isolation -r "$SCRIPT_DIR/requirements.lock"
 
 echo ""
 echo "=== Setup complete! ==="

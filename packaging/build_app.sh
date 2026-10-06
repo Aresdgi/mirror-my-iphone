@@ -40,7 +40,7 @@ iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 rm -rf "$(dirname "$ICONSET")"
 
 # App sources and helper scripts
-cp "$ROOT"/*.py "$ROOT/requirements.txt" "$APP/Contents/Resources/app/"
+cp "$ROOT"/*.py "$ROOT/requirements.lock" "$ROOT/requirements-build.lock" "$APP/Contents/Resources/app/"
 cp "$PACKAGING/bootstrap.sh" "$PACKAGING/setup.command" "$APP/Contents/Resources/"
 cp "$PACKAGING/mirror-my-iphone" "$APP/Contents/Resources/bin/"
 chmod +x "$APP/Contents/Resources/bootstrap.sh" "$APP/Contents/Resources/setup.command" \

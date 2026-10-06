@@ -9,23 +9,21 @@
 set -euo pipefail
 
 RESOURCES="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REQUIREMENTS="$RESOURCES/app/requirements.txt"
+REQUIREMENTS="$RESOURCES/app/requirements.lock"
+BUILD_REQUIREMENTS="$RESOURCES/app/requirements-build.lock"
 VENV="${1:-${MIRROR_MY_IPHONE_VENV:-$HOME/Library/Application Support/Mirror my iPhone/venv}}"
-STAMP="$VENV/.requirements.txt"
+STAMP="$VENV/.requirements.lock"
 
 find_python() {
     local candidate name
-    # Homebrew's python@3.12 (a dependency of the cask) first, then other recent versions
+    # requirements.lock is resolved for Python 3.12, so only 3.12 will do
     for candidate in \
         /opt/homebrew/opt/python@3.12/bin/python3.12 /usr/local/opt/python@3.12/bin/python3.12 \
-        /opt/homebrew/opt/python@3.13/bin/python3.13 /usr/local/opt/python@3.13/bin/python3.13 \
         /Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12 \
-        /Library/Frameworks/Python.framework/Versions/3.13/bin/python3.13; do
-        [ -x "$candidate" ] && { echo "$candidate"; return 0; }
-    done
-    for name in python3.12 python3.13 python3.11 python3.10 python3; do
-        candidate="$(command -v "$name" 2>/dev/null)" || continue
-        "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 10))' 2>/dev/null && { echo "$candidate"; return 0; }
+        "$(command -v python3.12 2>/dev/null)"; do
+        [ -n "$candidate" ] && [ -x "$candidate" ] \
+            && "$candidate" -c 'import sys; sys.exit(sys.version_info[:2] != (3, 12))' 2>/dev/null \
+            && { echo "$candidate"; return 0; }
     done
     return 1
 }
@@ -37,7 +35,7 @@ if [ -x "$VENV/bin/python3" ] && cmp -s "$REQUIREMENTS" "$STAMP" \
 fi
 
 PYTHON="$(find_python)" || {
-    echo "error: Python 3.10 or newer is required. Install it with: brew install python@3.12" >&2
+    echo "error: Python 3.12 is required. Install it with: brew install python@3.12" >&2
     exit 1
 }
 
@@ -51,9 +49,13 @@ if [ ! -d "$VENV" ]; then
     "$PYTHON" -m venv "$VENV"
 fi
 
+# Only the exact files pinned in the lock files (by SHA-256) and nothing beyond them. Everything is a
+# prebuilt wheel except hexdump, which exists only as source: it's built without build isolation, with
+# the hash-checked setuptools from requirements-build.lock, so pip never fetches unpinned build tools.
 echo "Mirror my iPhone: installing dependencies (about a minute)…"
-"$VENV/bin/python3" -m pip install --disable-pip-version-check --quiet --upgrade pip
-"$VENV/bin/python3" -m pip install --disable-pip-version-check --quiet -r "$REQUIREMENTS"
+"$VENV/bin/python3" -m pip install --disable-pip-version-check --quiet --require-hashes --no-deps --only-binary=:all: -r "$BUILD_REQUIREMENTS"
+"$VENV/bin/python3" -m pip install --disable-pip-version-check --quiet --require-hashes --no-deps --only-binary=:all: --no-binary=hexdump \
+    --no-build-isolation -r "$REQUIREMENTS"
 
 # Where libpython is, so the app can run Python in its own process (see launcher.c).
 # Empty if this Python has no shared library; the app then runs the interpreter directly.

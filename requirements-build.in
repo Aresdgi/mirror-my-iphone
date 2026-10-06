@@ -1,0 +1,4 @@
+# Build tools for the one dependency that ships only as source (hexdump, via pymobiledevice3).
+# Installed (hash-checked) before requirements.lock, which is then built without build isolation
+# so pip never fetches unpinned build tools. Compile like requirements.lock.
+setuptools

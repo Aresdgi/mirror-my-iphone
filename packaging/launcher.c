@@ -63,7 +63,7 @@ static int same_contents(const char *a, const char *b) {
 static int venv_ready(const char *venv, const char *requirements) {
     char python[PATH_MAX], stamp[PATH_MAX];
     snprintf(python, sizeof python, "%s/bin/python3", venv);
-    snprintf(stamp, sizeof stamp, "%s/.requirements.txt", venv);
+    snprintf(stamp, sizeof stamp, "%s/.requirements.lock", venv);
     return access(python, X_OK) == 0 && same_contents(requirements, stamp);
 }
 
@@ -106,7 +106,7 @@ int main(int argc, char **argv) {
 
     char main_py[PATH_MAX], requirements[PATH_MAX], setup[PATH_MAX];
     snprintf(main_py, sizeof main_py, "%s/Resources/app/main.py", contents);
-    snprintf(requirements, sizeof requirements, "%s/Resources/app/requirements.txt", contents);
+    snprintf(requirements, sizeof requirements, "%s/Resources/app/requirements.lock", contents);
     snprintf(setup, sizeof setup, "%s/Resources/setup.command", contents);
 
     char venv[PATH_MAX], python[PATH_MAX], libpython_file[PATH_MAX];

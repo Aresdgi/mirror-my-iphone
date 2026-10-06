@@ -1,3 +1,7 @@
+# Direct dependencies. Don't install from this file: install requirements.lock, which pins every
+# package (including indirect ones) to an exact version and SHA-256. To update it:
+#   pip-compile --generate-hashes --allow-unsafe --strip-extras --no-emit-index-url \
+#       --output-file requirements.lock requirements.in        (with Python 3.12)
 pymobiledevice3>=11.20.0  # async API (list_devices, DvtProvider, ...)
 PyQt6>=6.6.0
 Pillow>=10.0.0

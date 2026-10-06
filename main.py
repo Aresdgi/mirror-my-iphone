@@ -29,7 +29,7 @@ def check_dependencies():
 
     if missing:
         print(f"Missing packages: {', '.join(missing)}")
-        print("Install them with: pip install -r requirements.txt  (or run: bash setup.sh)")
+        print("Install them with: bash setup.sh  (installs requirements.lock, hash-checked)")
         sys.exit(1)
 
 
