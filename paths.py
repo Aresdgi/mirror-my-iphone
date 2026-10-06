@@ -28,6 +28,9 @@ WDA_PORT = 8100
 API_PORT = 8101  # preferred; the app picks a free port when it's taken
 API_FILE = SUPPORT_DIR / 'api.json'
 
+# PID of the WDA port forwarder the app started, to recognise one left over by a crash
+FORWARDER_PID_FILE = SUPPORT_DIR / 'port-forward.pid'
+
 # tunneld runs as root, so it logs to /tmp rather than into the user's Library
 TUNNELD_LOG = Path('/tmp/mirror-my-iphone-tunneld.log')
 

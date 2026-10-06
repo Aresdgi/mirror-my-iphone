@@ -5,6 +5,8 @@ Uses pymobiledevice3 for all device communication over USB.
 
 import asyncio
 import logging
+import os
+import signal
 import subprocess
 import sys
 import threading
@@ -14,6 +16,7 @@ from enum import Enum
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
+import paths
 import wda_project
 from doctor import model_name
 
@@ -34,6 +37,66 @@ def _log_output(stream, log: logging.Logger, on_line=None):
             log.debug(line)
             if on_line:
                 on_line(line)
+
+
+def _write_forwarder_pid(pid: int | None):
+    """Remember the port forwarder this app started, so a later run can recognise it if it's left over."""
+    try:
+        if pid is None:
+            paths.FORWARDER_PID_FILE.unlink(missing_ok=True)
+        else:
+            paths.SUPPORT_DIR.mkdir(parents=True, exist_ok=True)
+            paths.FORWARDER_PID_FILE.write_text(str(pid))
+    except OSError as e:
+        logger.debug(f"Can't update {paths.FORWARDER_PID_FILE}: {e}")
+
+
+def _listening_pids(port: int) -> list[int]:
+    """PIDs of the processes listening on a local TCP port (not those merely connected to it)."""
+    result = subprocess.run(['lsof', '-nP', f'-iTCP:{port}', '-sTCP:LISTEN', '-t'],
+                            capture_output=True, text=True, timeout=3)
+    return [int(pid) for pid in result.stdout.split() if pid.isdigit()]
+
+
+def _is_our_forwarder(pid: int, port: int) -> bool:
+    """A pymobiledevice3 port forwarder on `port` that this app started (its PID is in the PID file)."""
+    try:
+        recorded = int(paths.FORWARDER_PID_FILE.read_text().strip())
+    except (OSError, ValueError):
+        return False
+    if pid != recorded:
+        return False
+    result = subprocess.run(['ps', '-o', 'uid=,command=', '-p', str(pid)],
+                            capture_output=True, text=True, timeout=3)
+    uid, _, command = result.stdout.strip().partition(' ')
+    return (uid.isdigit() and int(uid) == os.getuid()
+            and f'pymobiledevice3 usbmux forward {port} ' in command + ' ')
+
+
+def _free_port_from_stale_forwarder(port: int) -> bool:
+    """Make `port` free for the forwarder. Only a forwarder left over by this app is stopped; any
+    other program listening there is left alone. Returns False if the port stays taken."""
+    try:
+        pids = _listening_pids(port)
+    except Exception as e:
+        logger.warning(f"Couldn't check who listens on port {port}: {e}")
+        return True  # the forwarder fails cleanly if the port is taken
+    for pid in pids:
+        if not _is_our_forwarder(pid, port):
+            logger.warning(f"Port {port} is used by another program (PID {pid}), which Mirror my iPhone "
+                           "won't stop. Touch control needs that port: quit that program and reconnect.")
+            return False
+        logger.info(f"Stopping a port forwarder left over from an earlier run (PID {pid})")
+        try:
+            os.kill(pid, signal.SIGTERM)
+            for _ in range(20):
+                time.sleep(0.1)
+                os.kill(pid, 0)
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    _write_forwarder_pid(None)
+    return True
 
 
 class ConnectionState(Enum):
@@ -333,26 +396,8 @@ class DeviceManager(QObject):
         This is needed for WDA access since it listens on the device's port 8100.
         """
         self.stop_port_forward()
-
-        # Kill any existing process on the port
-        try:
-            subprocess.run(
-                ['lsof', '-ti', f':{local_port}'],
-                capture_output=True, text=True, timeout=3
-            )
-            result = subprocess.run(
-                ['lsof', '-ti', f':{local_port}'],
-                capture_output=True, text=True, timeout=3
-            )
-            if result.stdout.strip():
-                for pid in result.stdout.strip().split('\n'):
-                    try:
-                        subprocess.run(['kill', '-9', pid.strip()], timeout=2)
-                    except Exception:
-                        pass
-                time.sleep(0.3)
-        except Exception:
-            pass
+        if not _free_port_from_stale_forwarder(local_port):
+            return False
 
         try:
             venv_python = sys.executable
@@ -380,6 +425,7 @@ class DeviceManager(QObject):
                 self._port_forward_proc = None
                 return False
 
+            _write_forwarder_pid(self._port_forward_proc.pid)
             logger.info(f"Port forwarding started: localhost:{local_port} -> device:{device_port}")
             return True
         except Exception as e:
@@ -398,6 +444,7 @@ class DeviceManager(QObject):
                 except Exception:
                     pass
             self._port_forward_proc = None
+            _write_forwarder_pid(None)
             logger.info("Port forwarding stopped")
 
     def _set_wda_state(self, state: str, message: str = ''):
