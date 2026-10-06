@@ -290,11 +290,15 @@ def _check_wda_project(project: Path | None) -> Check:
     title = 'WebDriverAgent downloaded'
     if project is None:
         return Check(TOUCH, title, Status.FAIL, "Not found.",
-                     fix="Mirror my iPhone can download it for you (about 5 MB), or clone it yourself: "
-                         f"git clone --depth 1 --branch {paths.WDA_VERSION} {paths.WDA_REPO} ~/WebDriverAgent",
+                     fix=f"Mirror my iPhone downloads the official {paths.WDA_VERSION} (commit "
+                         f"{paths.WDA_COMMIT[:12]}, about 5 MB) and checks it before every build.",
                      action='download_wda', action_label='Download')
-    version = wda_project.project_version(project)
-    return Check(TOUCH, title, Status.OK, f"{version + ' at ' if version else ''}{_short_path(project.parent)}.")
+    problem = wda_project.verify(project)
+    if problem:
+        return Check(TOUCH, title, Status.FAIL, problem, fix="Download it again: the app won't build this copy.",
+                     action='download_wda', action_label='Download')
+    return Check(TOUCH, title, Status.OK, f"{paths.WDA_VERSION} ({paths.WDA_COMMIT[:12]}, verified) "
+                                          f"at {_short_path(project.parent)}.")
 
 
 def _wda_running(wda_state) -> bool:

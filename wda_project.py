@@ -1,10 +1,13 @@
 """
-WebDriverAgent project — finds WDA on disk, picks a signing team, downloads WDA, and builds
-the xcodebuild command that installs and runs it on the iPhone. WDA provides touch control.
+WebDriverAgent project — downloads and verifies the app's own copy of WDA, picks a signing team,
+and builds the xcodebuild command that installs and runs it on the iPhone. WDA provides touch control.
+
+Only the copy in paths.WDA_DIR is ever built, and only while it's exactly the pinned commit
+(paths.WDA_COMMIT) of the official repository: xcodebuild runs the project's build scripts and signs
+the result with the user's Apple ID, so an unchecked project would be arbitrary code.
 """
 
 import logging
-import os
 import plistlib
 import re
 import shutil
@@ -49,45 +52,36 @@ class SigningTeam:
     free: bool  # personal team of a free Apple ID: profiles expire after 7 days (renewed on each start)
 
 
+# git, hardened against configuration in the checkout (hooks, fsmonitor) running anything
+_GIT = ['git', '-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'protocol.allow=never',
+        '-c', 'protocol.https.allow=always', '-c', 'advice.detachedHead=false']
+
+
 def find_project() -> Path | None:
-    """Locate WebDriverAgent.xcodeproj: $MIRROR_MY_IPHONE_WDA, the repo submodule, the doctor's
-    download location, a sibling checkout, ~/WebDriverAgent, then Spotlight."""
-    candidates = []
-    if os.environ.get('MIRROR_MY_IPHONE_WDA'):
-        candidates.append(Path(os.environ['MIRROR_MY_IPHONE_WDA']).expanduser())
-    candidates += [
-        paths.APP_DIR / 'WebDriverAgent',
-        paths.WDA_DIR,
-        paths.APP_DIR.parent / 'WebDriverAgent',
-        Path.home() / 'WebDriverAgent',
-    ]
-    for candidate in candidates:
-        project = candidate if candidate.suffix == '.xcodeproj' else candidate / 'WebDriverAgent.xcodeproj'
-        if (project / 'project.pbxproj').exists():
-            return project
+    """The app's own WebDriverAgent.xcodeproj (in paths.WDA_DIR), if it has been downloaded. Nothing
+    else is ever used: no environment variables, other checkouts or Spotlight results."""
+    project = paths.WDA_DIR / 'WebDriverAgent.xcodeproj'
+    return project if (project / 'project.pbxproj').exists() else None
+
+
+def _git(checkout: Path, *args: str, timeout: float = 10) -> subprocess.CompletedProcess:
+    return subprocess.run([*_GIT, '-C', str(checkout), *args], capture_output=True, text=True, timeout=timeout)
+
+
+def verify(project: Path) -> str | None:
+    """Why `project` can't be built, or None if it's exactly the pinned commit with no local changes."""
+    checkout = project.parent
     try:
-        result = subprocess.run(
-            ['mdfind', 'kMDItemFSName == "WebDriverAgent.xcodeproj"'],
-            capture_output=True, text=True, timeout=5,
-        )
-        for line in result.stdout.splitlines():
-            if (Path(line) / 'project.pbxproj').exists():
-                return Path(line)
-    except Exception:
-        pass
+        head = _git(checkout, 'rev-parse', 'HEAD').stdout.strip()
+        if head != paths.WDA_COMMIT:
+            return (f"The WebDriverAgent copy is at commit {head[:12] or 'unknown'}, not the pinned "
+                    f"{paths.WDA_COMMIT[:12]} ({paths.WDA_VERSION}). Download it again in the Doctor tab.")
+        changes = _git(checkout, 'status', '--porcelain', '--untracked-files=no').stdout.strip()
+    except Exception as e:
+        return f"Couldn't check the WebDriverAgent copy: {e}"
+    if changes:
+        return "The WebDriverAgent copy has been modified. Download it again in the Doctor tab."
     return None
-
-
-def project_version(project: Path) -> str | None:
-    """Release tag of a git checkout of WDA, if it has one."""
-    try:
-        result = subprocess.run(
-            ['git', '-C', str(project.parent), 'describe', '--tags', '--always'],
-            capture_output=True, text=True, timeout=5,
-        )
-        return result.stdout.strip() or None
-    except Exception:
-        return None
 
 
 def _read_pbxproj(project: Path) -> str:
@@ -172,20 +166,29 @@ def diagnose_failure(output_lines: list[str]) -> str:
 
 
 def download(dest: Path = paths.WDA_DIR) -> Path:
-    """Clone the pinned WDA release into `dest`. Returns the project path; raises on failure."""
+    """Fetch exactly the pinned commit of the official WDA repository into `dest` and check it.
+    Returns the project path; raises on failure, leaving no partial copy behind."""
     if shutil.which('git') is None:
         raise RuntimeError("git is missing — install Xcode or its Command Line Tools first")
     dest.parent.mkdir(parents=True, exist_ok=True)
     partial = dest.with_name(dest.name + '.partial')
     shutil.rmtree(partial, ignore_errors=True)
-    logger.info(f"Downloading WebDriverAgent {paths.WDA_VERSION} to {dest}")
-    result = subprocess.run(
-        ['git', 'clone', '--quiet', '--depth', '1', '--branch', paths.WDA_VERSION, paths.WDA_REPO, str(partial)],
-        capture_output=True, text=True, timeout=600,
-    )
-    if result.returncode != 0:
+    logger.info(f"Downloading WebDriverAgent {paths.WDA_VERSION} ({paths.WDA_COMMIT[:12]}) from {paths.WDA_REPO}")
+    try:
+        partial.mkdir()
+        for args, timeout in ((['init', '--quiet'], 30),
+                              (['fetch', '--quiet', '--depth', '1', paths.WDA_REPO, paths.WDA_COMMIT], 600),
+                              (['checkout', '--quiet', '--detach', 'FETCH_HEAD'], 60)):
+            result = _git(partial, *args, timeout=timeout)
+            if result.returncode != 0:
+                raise RuntimeError(f"git {args[0]} failed: {result.stderr.strip()[-300:]}")
+        problem = verify(partial / 'WebDriverAgent.xcodeproj')
+        if problem:
+            raise RuntimeError(f"Downloaded WebDriverAgent failed verification, discarded it. {problem}")
+    except BaseException:
         shutil.rmtree(partial, ignore_errors=True)
-        raise RuntimeError(f"git clone failed: {result.stderr.strip()[-300:]}")
+        raise
     shutil.rmtree(dest, ignore_errors=True)
     partial.rename(dest)
+    logger.info(f"WebDriverAgent {paths.WDA_VERSION} verified")
     return dest / 'WebDriverAgent.xcodeproj'

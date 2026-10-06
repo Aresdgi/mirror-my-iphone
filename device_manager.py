@@ -434,6 +434,11 @@ class DeviceManager(QObject):
             self._set_wda_state('unavailable', "WebDriverAgent isn't downloaded yet — get it in the Doctor tab.")
             logger.warning("WDA project not found")
             return False
+        problem = wda_project.verify(project)
+        if problem:
+            self._set_wda_state('failed', problem)
+            logger.error(f"Not building WebDriverAgent: {problem}")
+            return False
 
         team = wda_project.signing_team(project)
         if team is None:

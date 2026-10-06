@@ -17,10 +17,13 @@ SETTINGS_FILE = SUPPORT_DIR / 'settings.ini'
 LOG_DIR = Path.home() / 'Library' / 'Logs' / APP_NAME
 LOG_FILE = LOG_DIR / 'mirror-my-iphone.log'
 
-# The doctor downloads WebDriverAgent (touch control) here, pinned to a release it was tested with
+# The doctor downloads WebDriverAgent (touch control) here, and it's the only copy the app ever builds.
+# It's pinned to one commit of the official repository (tag v16.13.6), checked after every download
+# and before every build. The repo's WebDriverAgent submodule points at the same commit.
 WDA_DIR = SUPPORT_DIR / 'WebDriverAgent'
 WDA_REPO = 'https://github.com/appium/WebDriverAgent.git'
 WDA_VERSION = 'v16.13.6'
+WDA_COMMIT = '9d1d17ddb59e6097ddc3324b23ca9f4174507b12'
 WDA_PORT = 8100
 
 # Agent API (agent_api.py): the app serves it on 127.0.0.1 and writes its port and token here
