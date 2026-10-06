@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 # WDA ships with Facebook's bundle IDs, which no other team can register
 DEFAULT_RUNNER_BUNDLE_ID = 'com.facebook.WebDriverAgentRunner'
+RUNNER_BUNDLE_ID = 'io.github.aresdgi.mirrormyiphone.WebDriverAgentRunner'
 
 # Printed by WDA once its HTTP server is up
 SERVER_URL_PATTERN = re.compile(r'ServerURLHere->(.+?)<-ServerURLHere')
@@ -159,9 +160,9 @@ def signing_team(project: Path | None) -> SigningTeam | None:
 def runner_bundle_id(project: Path, team: SigningTeam) -> str | None:
     """A bundle ID this team can register, if the project still uses Facebook's."""
     if f'PRODUCT_BUNDLE_IDENTIFIER = {DEFAULT_RUNNER_BUNDLE_ID};' in _read_pbxproj(project):
-        # Keeps the app's old name: a new prefix would register another App ID (free teams get
-        # 10 a week) and install a second WebDriverAgent next to the one already on the iPhone.
-        return f'io.github.iphonemirror.{team.id.lower()}.WebDriverAgentRunner'
+        # Changing it registers another App ID (free teams get 10 a week) and installs a second
+        # WebDriverAgent next to the one already on the iPhone, so keep it stable.
+        return RUNNER_BUNDLE_ID
     return None
 
 

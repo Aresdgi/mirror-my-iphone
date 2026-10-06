@@ -6,8 +6,8 @@ Shared by the app, the doctor and the CLI.
 from pathlib import Path
 
 APP_NAME = 'Mirror my iPhone'
-BUNDLE_ID = 'io.github.bhuwanadhikari.mirrormyiphone'
-HOMEPAGE = 'https://github.com/bhuwanadhikari/Mirror-my-iPhone'
+BUNDLE_ID = 'io.github.aresdgi.mirrormyiphone'
+HOMEPAGE = 'https://github.com/Aresdgi/mirror-my-iphone'
 
 # Directory holding the app's Python sources (the repo, or Contents/Resources/app in the .app bundle)
 APP_DIR = Path(__file__).resolve().parent
