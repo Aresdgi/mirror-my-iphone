@@ -1,6 +1,7 @@
 """
 Input Handler — turns mouse and trackpad input on the mirrored screen into iPhone touches,
-sent through the WebDriverAgent (WDA) HTTP API.
+sent through the WebDriverAgent (WDA) HTTP API, which the app reaches over usbmux from inside its
+own process (usbmux_http.py): no port on the Mac leads to WDA.
 
     click              → tap, sent right away (each click of a double click is its own tap)
     click and hold     → long press (right-click does the same)
@@ -17,6 +18,7 @@ per touch point to place it, so the fewer points a gesture has, the sooner it ru
 """
 
 import base64
+import json
 import logging
 import math
 import queue
@@ -25,10 +27,10 @@ import time
 from concurrent.futures import Future
 from enum import Enum
 
-import requests
 from PyQt6.QtCore import QObject, QPointF, QSizeF, QTimer, pyqtSignal
 
 import paths
+from usbmux_http import USBConnectionError, USBHTTPClient
 
 logger = logging.getLogger(__name__)
 
@@ -46,12 +48,11 @@ class WDAClient:
     UI_TREE_EXCLUDED = ('visible,accessible,nativeAccessibilityElement,traits,nativeFrame,frame,focused,'
                         'placeholderValue,minValue,maxValue')
 
-    def __init__(self, base_url: str = f'http://127.0.0.1:{paths.WDA_PORT}', on_disconnect=None):
-        self.base_url = base_url
+    def __init__(self, on_disconnect=None):
         self.session_id: str | None = None
         self.scale: float | None = None  # iPhone pixels per point, from /wda/screen
         self._on_disconnect = on_disconnect
-        self._http = requests.Session()
+        self._http = USBHTTPClient(paths.WDA_PORT)
         self._actions: queue.Queue = queue.Queue()
         threading.Thread(target=self._run_actions, name='wda-actions', daemon=True).start()
 
@@ -64,10 +65,15 @@ class WDAClient:
         """No gesture queued or in flight."""
         return self._actions.unfinished_tasks == 0
 
+    def set_device(self, udid: str | None, port: int | None = None):
+        """Talk to WDA on this iPhone (None: on none), on its port on the iPhone if given."""
+        self.session_id = None
+        self._http.set_device(udid, port)
+
     def connect(self) -> bool:
         """Create a WDA session (blocking). Returns True on success."""
         try:
-            self._http.get(f'{self.base_url}/status', timeout=3).raise_for_status()
+            self._call('GET', '/status', session=False, timeout=3)
             value = self._call('POST', '/session', {'capabilities': {'alwaysMatch': {
                 # Don't wait for the app to settle before every gesture — that's what makes WDA feel slow
                 'waitForIdleTimeout': 0,
@@ -86,7 +92,7 @@ class WDAClient:
             self.scale = float(self._call('GET', '/wda/screen').get('scale') or 0) or None
             logger.info(f"WDA session {self.session_id} (screen scale {self.scale})")
             return True
-        except requests.ConnectionError:
+        except (USBConnectionError, TimeoutError):
             logger.debug("WDA not reachable")
         except Exception as e:
             logger.warning(f"WDA connection failed: {e}")
@@ -108,16 +114,18 @@ class WDAClient:
             if not self.session_id:
                 raise WDAError("no WDA session")
             path = f'/session/{self.session_id}{path}'
-        resp = self._http.request(method, f'{self.base_url}{path}', json=payload, timeout=timeout)
+        body = json.dumps(payload).encode() if payload is not None else None
+        headers = {'Content-Type': 'application/json'} if body is not None else {}
+        status, data = self._http.request(method, path, body=body, headers=headers, timeout=timeout)
         try:
-            value = resp.json().get('value')
-        except ValueError:
+            value = json.loads(data).get('value')
+        except (ValueError, AttributeError):
             value = None
-        if resp.status_code >= 400:
+        if status >= 400:
             error = value if isinstance(value, dict) else {}
             if error.get('error') == 'invalid session id':
                 self.session_id = None
-            raise WDAError(f"{method} {path}: {error.get('message') or resp.status_code}")
+            raise WDAError(f"{method} {path}: {error.get('message') or status}")
         return value if value is not None else {}
 
     def _run_actions(self):
@@ -131,7 +139,7 @@ class WDAClient:
             except WDAError as e:
                 logger.warning(f"WDA {name} failed: {e}")
                 future.set_exception(e)
-            except requests.ConnectionError:
+            except USBConnectionError:
                 logger.error(f"WDA connection lost during {name}")
                 self.session_id = None
                 future.set_exception(WDAError("lost the connection to WebDriverAgent"))
@@ -393,6 +401,7 @@ class InputHandler(QObject):
 
     def cleanup(self):
         self.wda.disconnect()
+        self.wda.set_device(None)
 
 
 def _distance(a: QPointF, b: QPointF) -> float:

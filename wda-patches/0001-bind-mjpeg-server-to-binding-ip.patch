@@ -1,0 +1,13 @@
+diff --git a/WebDriverAgentLib/Routing/FBWebServer.m b/WebDriverAgentLib/Routing/FBWebServer.m
+index af0d82b..d34ff3c 100644
+--- a/WebDriverAgentLib/Routing/FBWebServer.m
++++ b/WebDriverAgentLib/Routing/FBWebServer.m
+@@ -133,6 +133,8 @@ - (void)initScreenshotsBroadcaster
+   self.mjpegServer = [[FBMjpegServer alloc] init];
+   self.screenshotsBroadcaster = [[FBTCPSocket alloc]
+                                  initWithPort:(uint16_t)FBConfiguration.sharedInstance.mjpegServerPort];
++  // Mirror my iPhone: listen where the HTTP server does (USE_IP), not on every interface
++  self.screenshotsBroadcaster.interface = FBConfiguration.sharedInstance.bindingIPAddress;
+   self.mjpegServer.socket = self.screenshotsBroadcaster;
+   self.screenshotsBroadcaster.delegate = self.mjpegServer;
+   NSError *error;

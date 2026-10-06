@@ -8,11 +8,11 @@ import logging
 import os
 import signal
 import subprocess
-import sys
 import threading
 import time
 from collections import deque
 from enum import Enum
+from urllib.parse import urlsplit
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
@@ -22,7 +22,6 @@ from doctor import model_name
 
 logger = logging.getLogger(__name__)
 xcodebuild_logger = logging.getLogger('wda.xcodebuild')
-forward_logger = logging.getLogger('wda.port_forward')
 
 # After a failed connection attempt, wait this long before retrying the same device
 RETRY_DELAY = 10
@@ -39,64 +38,61 @@ def _log_output(stream, log: logging.Logger, on_line=None):
                 on_line(line)
 
 
-def _write_forwarder_pid(pid: int | None):
-    """Remember the port forwarder this app started, so a later run can recognise it if it's left over."""
+def _write_wda_pid(pid: int | None):
+    """Remember the xcodebuild running WDA, so a later run can stop it if this one crashes."""
     try:
         if pid is None:
-            paths.FORWARDER_PID_FILE.unlink(missing_ok=True)
+            paths.WDA_PID_FILE.unlink(missing_ok=True)
         else:
             paths.SUPPORT_DIR.mkdir(parents=True, exist_ok=True)
-            paths.FORWARDER_PID_FILE.write_text(str(pid))
+            paths.WDA_PID_FILE.write_text(str(pid))
     except OSError as e:
-        logger.debug(f"Can't update {paths.FORWARDER_PID_FILE}: {e}")
+        logger.debug(f"Can't update {paths.WDA_PID_FILE.name}: {e}")
 
 
-def _listening_pids(port: int) -> list[int]:
-    """PIDs of the processes listening on a local TCP port (not those merely connected to it)."""
-    result = subprocess.run(['lsof', '-nP', f'-iTCP:{port}', '-sTCP:LISTEN', '-t'],
-                            capture_output=True, text=True, timeout=3)
-    return [int(pid) for pid in result.stdout.split() if pid.isdigit()]
-
-
-def _is_our_forwarder(pid: int, port: int) -> bool:
-    """A pymobiledevice3 port forwarder on `port` that this app started (its PID is in the PID file)."""
+def _alive(pid: int) -> bool:
     try:
-        recorded = int(paths.FORWARDER_PID_FILE.read_text().strip())
-    except (OSError, ValueError):
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
         return False
-    if pid != recorded:
-        return False
-    result = subprocess.run(['ps', '-o', 'uid=,command=', '-p', str(pid)],
-                            capture_output=True, text=True, timeout=3)
-    uid, _, command = result.stdout.strip().partition(' ')
-    return (uid.isdigit() and int(uid) == os.getuid()
-            and f'pymobiledevice3 usbmux forward {port} ' in command + ' ')
+    except PermissionError:
+        return True
 
 
-def _free_port_from_stale_forwarder(port: int) -> bool:
-    """Make `port` free for the forwarder. Only a forwarder left over by this app is stopped; any
-    other program listening there is left alone. Returns False if the port stays taken."""
-    try:
-        pids = _listening_pids(port)
-    except Exception as e:
-        logger.warning(f"Couldn't check who listens on port {port}: {e}")
-        return True  # the forwarder fails cleanly if the port is taken
-    for pid in pids:
-        if not _is_our_forwarder(pid, port):
-            logger.warning(f"Port {port} is used by another program (PID {pid}), which Mirror my iPhone "
-                           "won't stop. Touch control needs that port: quit that program and reconnect.")
-            return False
-        logger.info(f"Stopping a port forwarder left over from an earlier run (PID {pid})")
+def _stop_pid(pid: int):
+    """Stop a process the way Ctrl-C would, so xcodebuild ends the test run on the iPhone; then harder."""
+    for sig, wait in ((signal.SIGINT, 15), (signal.SIGTERM, 5), (signal.SIGKILL, 2)):
         try:
-            os.kill(pid, signal.SIGTERM)
-            for _ in range(20):
-                time.sleep(0.1)
-                os.kill(pid, 0)
-            os.kill(pid, signal.SIGKILL)
+            os.kill(pid, sig)
         except ProcessLookupError:
-            pass
-    _write_forwarder_pid(None)
-    return True
+            return
+        deadline = time.monotonic() + wait
+        while time.monotonic() < deadline:
+            if not _alive(pid):
+                return
+            time.sleep(0.1)
+
+
+def stop_leftover_wda():
+    """Stop the xcodebuild (and so WDA on the iPhone) an earlier run of the app left running, e.g.
+    after a crash. Only that process: it must be the recorded PID, ours, and xcodebuild running
+    the app's own WebDriverAgent."""
+    try:
+        pid = int(paths.WDA_PID_FILE.read_text().strip())
+    except (OSError, ValueError):
+        return
+    try:
+        result = subprocess.run(['ps', '-o', 'uid=,command=', '-p', str(pid)],
+                                capture_output=True, text=True, timeout=3)
+        uid, _, command = result.stdout.strip().partition(' ')
+        if (uid.isdigit() and int(uid) == os.getuid() and 'xcodebuild' in command
+                and 'WebDriverAgentRunner' in command and str(paths.WDA_DIR) in command):
+            logger.info("Stopping WebDriverAgent left running by an earlier run of the app")
+            _stop_pid(pid)
+    except Exception as e:
+        logger.warning(f"Couldn't check for a leftover WebDriverAgent: {e}")
+    _write_wda_pid(None)
 
 
 class ConnectionState(Enum):
@@ -124,8 +120,8 @@ class DeviceManager(QObject):
         self._device_info = {}
         self._lock = threading.Lock()
         self._current_udid = None
-        self._port_forward_proc = None
         self._wda_proc = None
+        self.wda_port = paths.WDA_PORT  # WDA's port on the iPhone, from its startup message
         self._wda_state = ('idle', '')
         self._retry_at = 0.0
 
@@ -357,63 +353,6 @@ class DeviceManager(QObject):
             logger.debug(f"Orientation query failed: {e}")
             return 1  # Default to portrait
 
-    def start_port_forward(self, local_port: int = 8100, device_port: int = 8100):
-        """Start USB port forwarding: localhost:local_port -> device:device_port.
-
-        This is needed for WDA access since it listens on the device's port 8100.
-        """
-        self.stop_port_forward()
-        if not _free_port_from_stale_forwarder(local_port):
-            return False
-
-        try:
-            venv_python = sys.executable
-            cmd = [
-                venv_python, '-m', 'pymobiledevice3',
-                'usbmux', 'forward',
-                str(local_port), str(device_port),
-            ]
-            if self._current_udid:
-                cmd.extend(['--udid', self._current_udid])
-
-            self._port_forward_proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-            )
-            threading.Thread(
-                target=_log_output, args=(self._port_forward_proc.stdout, forward_logger), daemon=True,
-            ).start()
-            time.sleep(0.5)
-
-            if self._port_forward_proc.poll() is not None:
-                logger.error("Port forward failed — see the wda.port_forward lines in the log")
-                self._port_forward_proc = None
-                return False
-
-            _write_forwarder_pid(self._port_forward_proc.pid)
-            logger.info(f"Port forwarding started: localhost:{local_port} -> device:{device_port}")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to start port forwarding: {e}")
-            return False
-
-    def stop_port_forward(self):
-        """Stop the port forwarding subprocess."""
-        if self._port_forward_proc:
-            try:
-                self._port_forward_proc.terminate()
-                self._port_forward_proc.wait(timeout=3)
-            except Exception:
-                try:
-                    self._port_forward_proc.kill()
-                except Exception:
-                    pass
-            self._port_forward_proc = None
-            _write_forwarder_pid(None)
-            logger.info("Port forwarding stopped")
-
     def _set_wda_state(self, state: str, message: str = ''):
         self._wda_state = (state, message)
         self.wda_state_changed.emit(state, message)
@@ -447,8 +386,7 @@ class DeviceManager(QObject):
             return False
 
         cmd = wda_project.xcodebuild_command(project, self._current_udid, team)
-        logger.info(f"Starting WDA from {project} (team {team.id}, device {self._current_udid})")
-        logger.debug(f"WDA command: {' '.join(cmd)}")
+        logger.info(f"Starting WebDriverAgent {paths.WDA_VERSION} ({'free' if team.free else 'paid'} signing team)")
         try:
             proc = subprocess.Popen(
                 cmd,
@@ -456,12 +394,14 @@ class DeviceManager(QObject):
                 stderr=subprocess.STDOUT,
                 text=True,
                 cwd=project.parent,
+                env=wda_project.xcodebuild_environment(),
             )
         except Exception as e:
             logger.error(f"Failed to start WDA: {e}")
             self._set_wda_state('failed', f"Couldn't run xcodebuild: {e}")
             return False
         self._wda_proc = proc
+        _write_wda_pid(proc.pid)
         self._set_wda_state('starting', "Building and installing WebDriverAgent… The first time takes a few minutes.")
         threading.Thread(target=self._watch_wda, args=(proc,), daemon=True).start()
         return True
@@ -474,7 +414,14 @@ class DeviceManager(QObject):
             recent.append(line)
             match = wda_project.SERVER_URL_PATTERN.search(line)
             if match:
-                logger.info(f"WDA is up at {match.group(1)} on the device")
+                url = urlsplit(match.group(1))
+                if url.hostname != '127.0.0.1':
+                    # USE_IP was ignored: WDA would answer anyone on the iPhone's networks
+                    logger.error("WebDriverAgent isn't bound to the iPhone's loopback; stopping it")
+                    threading.Thread(target=self.stop_wda, daemon=True).start()
+                    return
+                self.wda_port = url.port or paths.WDA_PORT
+                logger.info(f"WebDriverAgent is up on the iPhone (loopback only, port {self.wda_port})")
                 self._set_wda_state('running', "WebDriverAgent is running.")
 
         _log_output(proc.stdout, xcodebuild_logger, on_line)
@@ -486,19 +433,33 @@ class DeviceManager(QObject):
         self._set_wda_state('failed', hint)
 
     def stop_wda(self):
-        """Stop the WDA xcodebuild process."""
+        """Stop the WDA xcodebuild process — which ends WebDriverAgent on the iPhone — and check that
+        WDA no longer answers there."""
         proc, self._wda_proc = self._wda_proc, None
         if proc:
-            try:
-                proc.terminate()
-                proc.wait(timeout=5)
-            except Exception:
-                try:
-                    proc.kill()
-                except Exception:
-                    pass
-            logger.info("WDA stopped")
+            if proc.poll() is None:
+                _stop_pid(proc.pid)
+                proc.wait()
+            _write_wda_pid(None)
+            udid = self._current_udid
+            if udid and self._wda_answers(udid):
+                logger.warning("WebDriverAgent still answers on the iPhone after stopping xcodebuild. "
+                               "Close WebDriverAgentRunner on the iPhone (or restart it).")
+            else:
+                logger.info("WebDriverAgent stopped")
         self._set_wda_state('idle')
+
+    def _wda_answers(self, udid: str) -> bool:
+        """Whether something still accepts connections on WDA's port on the iPhone, after giving it
+        a few seconds to go away."""
+        from usbmux_http import USBConnectionError, open_socket
+        for _ in range(10):
+            try:
+                open_socket(udid, self.wda_port).close()
+            except USBConnectionError:
+                return False
+            time.sleep(0.5)
+        return True
 
     def is_wda_running(self) -> bool:
         """Check if WDA process is still alive."""
@@ -512,7 +473,6 @@ class DeviceManager(QObject):
     def disconnect(self):
         """Disconnect from device and clean up resources."""
         self.stop_wda()
-        self.stop_port_forward()
 
         with self._lock:
             try:

@@ -13,8 +13,6 @@ from enum import Enum
 from pathlib import Path
 from typing import Callable, Iterator
 
-import requests
-
 import paths
 import wda_project
 
@@ -141,7 +139,7 @@ def iter_checks(in_app: bool = True, wda_state: Callable[[], tuple[str, str]] | 
         project = wda_project.find_project()
         yield _check_signing_team(project)
         yield _check_wda_project(project)
-        running = _wda_running(wda_state)
+        running = _wda_running(wda_state, device)
         yield _check_wda_running(device, running, wda_state)
         yield _manual_check(
             'Developer trusted on iPhone', running,
@@ -301,13 +299,20 @@ def _check_wda_project(project: Path | None) -> Check:
                                           f"at {_short_path(project.parent)}.")
 
 
-def _wda_running(wda_state) -> bool:
+def _wda_running(wda_state, device: _Device) -> bool:
     if wda_state is not None and wda_state()[0] == 'running':
         return True
-    try:
-        return requests.get(f'http://127.0.0.1:{paths.WDA_PORT}/status', timeout=1).ok
-    except requests.RequestException:
+    if device.usb is None:
         return False
+    from usbmux_http import USBHTTPClient
+    client = USBHTTPClient(paths.WDA_PORT)
+    client.set_device(device.usb.serial)
+    try:
+        return client.request('GET', '/status', timeout=2)[0] == 200
+    except (ConnectionError, TimeoutError):
+        return False
+    finally:
+        client.close()
 
 
 def _check_wda_running(device: _Device, running: bool, wda_state) -> Check:

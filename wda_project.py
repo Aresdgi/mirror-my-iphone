@@ -3,11 +3,14 @@ WebDriverAgent project — downloads and verifies the app's own copy of WDA, pic
 and builds the xcodebuild command that installs and runs it on the iPhone. WDA provides touch control.
 
 Only the copy in paths.WDA_DIR is ever built, and only while it's exactly the pinned commit
-(paths.WDA_COMMIT) of the official repository: xcodebuild runs the project's build scripts and signs
-the result with the user's Apple ID, so an unchecked project would be arbitrary code.
+(paths.WDA_COMMIT) of the official repository plus this app's patches (wda-patches/): xcodebuild runs
+the project's build scripts and signs the result with the user's Apple ID, so an unchecked project
+would be arbitrary code.
 """
 
+import hashlib
 import logging
+import os
 import plistlib
 import re
 import shutil
@@ -52,6 +55,15 @@ class SigningTeam:
     free: bool  # personal team of a free Apple ID: profiles expire after 7 days (renewed on each start)
 
 
+# Local changes applied on top of the pinned commit (wda-patches/*.patch, in order), and the SHA-256
+# of every file they change. Nothing else in the checkout may differ from the commit.
+PATCHES_DIR = paths.APP_DIR / 'wda-patches'
+PATCHED_FILES = {
+    # 0001-bind-mjpeg-server-to-binding-ip.patch: the screen stream (MJPEG, port 9100) listens only
+    # where the HTTP server does, instead of on every interface including Wi-Fi
+    'WebDriverAgentLib/Routing/FBWebServer.m': '0129a0af0eab33446da6879362eabcec88fd4125aedd40faf46c715caa7b79ac',
+}
+
 # git, hardened against configuration in the checkout (hooks, fsmonitor) running anything
 _GIT = ['git', '-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'protocol.allow=never',
         '-c', 'protocol.https.allow=always', '-c', 'advice.detachedHead=false']
@@ -68,20 +80,34 @@ def _git(checkout: Path, *args: str, timeout: float = 10) -> subprocess.Complete
     return subprocess.run([*_GIT, '-C', str(checkout), *args], capture_output=True, text=True, timeout=timeout)
 
 
-def verify(project: Path) -> str | None:
-    """Why `project` can't be built, or None if it's exactly the pinned commit with no local changes."""
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def verify(project: Path, patched: bool = True) -> str | None:
+    """Why `project` can't be built, or None if it's exactly the pinned commit plus this app's
+    patches (`patched`) or nothing else (not `patched`)."""
     checkout = project.parent
     try:
         head = _git(checkout, 'rev-parse', 'HEAD').stdout.strip()
         if head != paths.WDA_COMMIT:
             return (f"The WebDriverAgent copy is at commit {head[:12] or 'unknown'}, not the pinned "
                     f"{paths.WDA_COMMIT[:12]} ({paths.WDA_VERSION}). Download it again in the Doctor tab.")
-        changes = _git(checkout, 'status', '--porcelain', '--untracked-files=no').stdout.strip()
+        status = _git(checkout, 'status', '--porcelain', '--untracked-files=no', '-z').stdout
+        changed = {entry[3:] for entry in status.split('\0') if entry}
+        expected = set(PATCHED_FILES) if patched else set()
+        if changed != expected or any(_sha256(checkout / name) != digest
+                                      for name, digest in PATCHED_FILES.items() if patched):
+            return "The WebDriverAgent copy has been modified. Download it again in the Doctor tab."
     except Exception as e:
         return f"Couldn't check the WebDriverAgent copy: {e}"
-    if changes:
-        return "The WebDriverAgent copy has been modified. Download it again in the Doctor tab."
     return None
+
+
+def xcodebuild_environment() -> dict:
+    """Environment for xcodebuild. TEST_RUNNER_* variables reach WDA on the iPhone: USE_IP makes it
+    listen on the iPhone's loopback only (usbmux connects there), not on Wi-Fi or other networks."""
+    return {**os.environ, 'TEST_RUNNER_USE_IP': '127.0.0.1'}
 
 
 def _read_pbxproj(project: Path) -> str:
@@ -182,13 +208,20 @@ def download(dest: Path = paths.WDA_DIR) -> Path:
             result = _git(partial, *args, timeout=timeout)
             if result.returncode != 0:
                 raise RuntimeError(f"git {args[0]} failed: {result.stderr.strip()[-300:]}")
-        problem = verify(partial / 'WebDriverAgent.xcodeproj')
+        problem = verify(partial / 'WebDriverAgent.xcodeproj', patched=False)
         if problem:
             raise RuntimeError(f"Downloaded WebDriverAgent failed verification, discarded it. {problem}")
+        for patch in sorted(PATCHES_DIR.glob('*.patch')):
+            result = _git(partial, 'apply', str(patch), timeout=30)
+            if result.returncode != 0:
+                raise RuntimeError(f"Couldn't apply {patch.name}: {result.stderr.strip()[-300:]}")
+        problem = verify(partial / 'WebDriverAgent.xcodeproj')
+        if problem:
+            raise RuntimeError(f"Patched WebDriverAgent failed verification, discarded it. {problem}")
     except BaseException:
         shutil.rmtree(partial, ignore_errors=True)
         raise
     shutil.rmtree(dest, ignore_errors=True)
     partial.rename(dest)
-    logger.info(f"WebDriverAgent {paths.WDA_VERSION} verified")
+    logger.info(f"WebDriverAgent {paths.WDA_VERSION} verified and patched")
     return dest / 'WebDriverAgent.xcodeproj'

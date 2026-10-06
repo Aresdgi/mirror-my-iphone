@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import (
 
 import paths
 from agent_api import AgentAPI
-from device_manager import ConnectionState, DeviceManager
+from device_manager import ConnectionState, DeviceManager, stop_leftover_wda
 from doctor_panel import DoctorPanel
 from input_handler import InputHandler
 from log_panel import LogPanel
@@ -292,8 +292,10 @@ class MainWindow(QMainWindow):
         self._apply_zoom()
         self._restore_sidebar()
 
-        # Start device discovery and the agent API
+        # Start device discovery and the agent API. A WebDriverAgent an earlier run left behind
+        # (after a crash) is stopped first.
         enable_video_capture()
+        threading.Thread(target=stop_leftover_wda, name='leftover-wda', daemon=True).start()
         self.device_manager.start_discovery()
         self.agent_api.start()
         QTimer.singleShot(0, self._run_doctor_on_first_launch)
@@ -435,7 +437,7 @@ class MainWindow(QMainWindow):
         self.device_manager.device_disconnected.connect(self._on_device_disconnected)
         self.device_manager.connection_error.connect(self._on_connection_error)
         self.device_manager.connection_state_changed.connect(self._on_state_changed)
-        self.device_manager.wda_state_changed.connect(lambda *_: self._update_banner())
+        self.device_manager.wda_state_changed.connect(self._on_wda_state)
         self.input_handler.wda_status_changed.connect(self._on_wda_status)
         self.doctor_panel.wda_downloaded.connect(self._on_wda_downloaded)
         self.agent_api.gesture_sent.connect(self.screen_view.show_agent_touch)
@@ -553,6 +555,7 @@ class MainWindow(QMainWindow):
         self._stop_capture()
         self.agent_api.clear_frame()
         self.input_handler.forget_wda()
+        self.input_handler.wda.set_device(None)
         self._battery_timer.stop()
         self._wda_retry_timer.stop()
         self._status_label.setText("Not connected")
@@ -622,13 +625,18 @@ class MainWindow(QMainWindow):
     # --- WebDriverAgent (touch control) ---
 
     def _start_wda_auto(self):
-        """Port forward + xcodebuild (in the background), then keep trying to open a session."""
-        def setup():
-            self.device_manager.start_port_forward(8100, 8100)
-            self.device_manager.start_wda()
-
-        threading.Thread(target=setup, daemon=True).start()
+        """xcodebuild (in the background), then keep trying to open a session. WDA is reached over
+        usbmux from inside this process, so no port is opened on the Mac."""
+        self.input_handler.wda.set_device(self.device_manager.device_info.get('udid'), self.device_manager.wda_port)
+        threading.Thread(target=self.device_manager.start_wda, daemon=True).start()
         self._wda_retry_timer.start()
+        self._update_banner()
+
+    def _on_wda_state(self, state: str, _message: str):
+        if state == 'running':  # WDA may have picked another port on the iPhone than the default
+            wda = self.input_handler.wda
+            if not wda.is_connected:
+                wda.set_device(self.device_manager.device_info.get('udid'), self.device_manager.wda_port)
         self._update_banner()
 
     def _on_wda_downloaded(self):

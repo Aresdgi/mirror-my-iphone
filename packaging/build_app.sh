@@ -41,6 +41,7 @@ rm -rf "$(dirname "$ICONSET")"
 
 # App sources and helper scripts
 cp "$ROOT"/*.py "$ROOT/requirements.lock" "$ROOT/requirements-build.lock" "$APP/Contents/Resources/app/"
+cp -R "$ROOT/wda-patches" "$APP/Contents/Resources/app/"
 cp "$PACKAGING/bootstrap.sh" "$PACKAGING/setup.command" "$APP/Contents/Resources/"
 cp "$PACKAGING/mirror-my-iphone" "$APP/Contents/Resources/bin/"
 chmod +x "$APP/Contents/Resources/bootstrap.sh" "$APP/Contents/Resources/setup.command" \
