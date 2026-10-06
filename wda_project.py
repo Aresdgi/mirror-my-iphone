@@ -18,6 +18,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+import log_privacy
 import paths
 
 logger = logging.getLogger(__name__)
@@ -132,6 +133,8 @@ def xcode_teams() -> list[SigningTeam]:
     for account_teams in accounts.values():
         for team in account_teams:
             if team.get('teamID'):
+                log_privacy.register(team['teamID'], 'team')
+                log_privacy.register(team.get('teamName'), 'team name')
                 teams.append(SigningTeam(
                     id=team['teamID'],
                     name=team.get('teamName', team['teamID']),
@@ -145,6 +148,7 @@ def signing_team(project: Path | None) -> SigningTeam | None:
     if project:
         match = re.search(r'DEVELOPMENT_TEAM\s*=\s*"?([A-Z0-9]{10})"?;', _read_pbxproj(project))
         if match:
+            log_privacy.register(match.group(1), 'team')
             known = {team.id: team for team in xcode_teams()}
             return known.get(match.group(1), SigningTeam(match.group(1), match.group(1), free=False))
     teams = xcode_teams()

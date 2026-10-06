@@ -9,6 +9,7 @@ Usage:
 
 import logging
 import logging.handlers
+import os
 import signal
 import sys
 import threading
@@ -33,10 +34,21 @@ def check_dependencies():
         sys.exit(1)
 
 
+class _PrivateRotatingFileHandler(logging.handlers.RotatingFileHandler):
+    """A rotating log whose files only this user can read (0600), including ones made on rollover."""
+
+    def _open(self):
+        return open(self.baseFilename, self.mode, encoding=self.encoding, errors=self.errors,
+                    opener=lambda path, flags: os.open(path, flags, 0o600))
+
+
 def setup_logging():
     """Log to the terminal (info and up), and at debug level to ~/Library/Logs/Mirror my iPhone
-    and the Logs tab."""
+    and the Logs tab. Every destination goes through log_privacy, which keeps device IDs, signing
+    teams, email and IP addresses and the iPhone's name out of the log."""
     from log_panel import LOG_BUFFER, LOG_DATE_FORMAT, LOG_FORMAT
+    from log_privacy import RedactingFilter
+    redacting = RedactingFilter()
 
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)
@@ -44,18 +56,24 @@ def setup_logging():
     console = logging.StreamHandler()
     console.setLevel(logging.INFO)
     console.setFormatter(logging.Formatter(LOG_FORMAT, LOG_DATE_FORMAT))
+    console.addFilter(redacting)
     root.addHandler(console)
 
     try:
-        paths.LOG_DIR.mkdir(parents=True, exist_ok=True)
-        log_file = logging.handlers.RotatingFileHandler(
+        paths.LOG_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+        paths.LOG_DIR.chmod(0o700)
+        for existing in paths.LOG_DIR.glob(paths.LOG_FILE.name + '*'):
+            existing.chmod(0o600)
+        log_file = _PrivateRotatingFileHandler(
             paths.LOG_FILE, maxBytes=2_000_000, backupCount=3, encoding='utf-8',
         )
         log_file.setFormatter(logging.Formatter('%(asctime)s %(levelname)-7s %(name)s: %(message)s'))
+        log_file.addFilter(redacting)
         root.addHandler(log_file)
     except OSError as e:
         logging.warning(f"Can't write the log file: {e}")
 
+    LOG_BUFFER.addFilter(redacting)
     root.addHandler(LOG_BUFFER)
 
     # Third-party debug chatter

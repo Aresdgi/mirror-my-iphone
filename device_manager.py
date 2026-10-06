@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
+import log_privacy
 import paths
 import wda_project
 from doctor import model_name
@@ -228,14 +229,18 @@ class DeviceManager(QObject):
     async def _connect_async(self, udid: str):
         from pymobiledevice3.lockdown import create_using_usbmux
 
+        log_privacy.register(udid, 'udid')
         self._lockdown = await create_using_usbmux(serial=udid)
 
         # Get device info via lockdown (works without tunnel)
         product_type = await self._lockdown.get_value(key='ProductType')
         screen = await self._lockdown.get_value(domain='com.apple.mobile.iTunes') or {}
         scale = float(screen.get('ScreenScaleFactor') or 0)
+        name = await self._lockdown.get_value(key='DeviceName')
+        log_privacy.register(name, 'iphone')
+        log_privacy.register(self._lockdown.identifier, 'udid')
         self._device_info = {
-            'name': await self._lockdown.get_value(key='DeviceName'),
+            'name': name,
             'model': product_type,
             'model_name': model_name(product_type),
             'ios_version': self._lockdown.product_version,

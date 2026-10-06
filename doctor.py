@@ -13,6 +13,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Callable, Iterator
 
+import log_privacy
 import paths
 import wda_project
 
@@ -90,6 +91,7 @@ class _Device:
         if not devices:
             return
         self.usb = devices[0]
+        log_privacy.register(self.usb.serial, 'udid')
         try:
             self.lockdown = self.run(create_using_usbmux(serial=self.usb.serial, autopair=False))
         except Exception as e:
@@ -97,6 +99,7 @@ class _Device:
             return
         try:
             self.name = self.run(self.lockdown.get_value(key='DeviceName'), 5)
+            log_privacy.register(self.name, 'iphone')
         except Exception:
             pass
 
