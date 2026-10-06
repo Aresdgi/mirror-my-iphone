@@ -18,9 +18,11 @@ Coordinates are iPhone points, the same as screenshot pixels at scale 1. Gesture
 iPhone has performed them. A screenshot taken within `settle` seconds (3 by default) of a gesture
 waits until the screen stops changing, so it shows the result rather than an animation.
 
-Every request needs `Authorization: Bearer <token>`. The app writes its URL and token to
-paths.API_FILE, readable only by this user. Requests from web pages (they carry an Origin header)
-or addressed to another host name are refused, so websites can't reach the API through a browser.
+Off by default: it only runs while "Allow AI agents and scripts to control the iPhone" is on in
+Settings. Every request needs `Authorization: Bearer <token>`, a new token each time the API starts.
+The app writes its URL and token to paths.API_FILE, readable only by this user, and deletes the file
+when the API stops. Requests from web pages (they carry an Origin header) or addressed to another
+host name are refused, so websites can't reach the API through a browser.
 """
 
 import hmac
@@ -91,8 +93,14 @@ class AgentAPI(QObject):
 
     # --- Lifecycle (UI thread) ---
 
+    @property
+    def is_running(self) -> bool:
+        return self._server is not None
+
     def start(self):
-        token = _load_token()
+        if self._server:
+            return
+        token = secrets.token_urlsafe(32)  # new every time: a leaked token dies with the session
         for port in (paths.API_PORT, 0):
             try:
                 server = ThreadingHTTPServer(('127.0.0.1', port), _Handler)
@@ -118,6 +126,8 @@ class AgentAPI(QObject):
             self._server.shutdown()
             self._server.server_close()
             self._server = None
+            _remove_api_file()
+            logger.info("Agent API stopped")
 
     def set_frame(self, image: QImage):
         with self._frame_changed:
@@ -488,22 +498,38 @@ def _flatten(tree: dict, width: float, height: float) -> tuple[list[dict], bool]
     return elements, keyboard
 
 
-def _load_token() -> str:
-    """The token from the last run (so configured clients keep working), or a new one."""
-    try:
-        token = json.loads(paths.API_FILE.read_text()).get('token')
-        if isinstance(token, str) and len(token) >= 32:
-            return token
-    except (OSError, ValueError, AttributeError):
-        pass
-    return secrets.token_urlsafe(32)
-
-
 def _write_api_file(content: dict):
     """Write paths.API_FILE atomically, readable only by this user."""
     paths.SUPPORT_DIR.mkdir(parents=True, exist_ok=True)
     temporary = paths.API_FILE.with_suffix('.tmp')
-    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    temporary.unlink(missing_ok=True)  # O_CREAT keeps an existing file's mode
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, 'w') as file:
         json.dump(content, file, indent=2)
     os.replace(temporary, paths.API_FILE)
+
+
+def _remove_api_file():
+    """Delete paths.API_FILE if this process wrote it (another instance of the app may own it)."""
+    try:
+        if json.loads(paths.API_FILE.read_text()).get('pid') == os.getpid():
+            paths.API_FILE.unlink()
+    except (OSError, ValueError, AttributeError):
+        pass
+
+
+def remove_stale_api_file():
+    """At startup: delete an API file left by an earlier run that didn't stop cleanly."""
+    try:
+        pid = json.loads(paths.API_FILE.read_text()).get('pid')
+    except (OSError, ValueError, AttributeError):
+        return
+    try:
+        if isinstance(pid, int) and pid > 0:
+            os.kill(pid, 0)
+            return  # still running
+    except ProcessLookupError:
+        pass
+    except PermissionError:
+        return
+    paths.API_FILE.unlink(missing_ok=True)

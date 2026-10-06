@@ -20,13 +20,13 @@ from PyQt6.QtWidgets import (
 )
 
 import paths
-from agent_api import AgentAPI
+from agent_api import AgentAPI, remove_stale_api_file
 from device_manager import ConnectionState, DeviceManager, stop_leftover_wda
 from doctor_panel import DoctorPanel
 from input_handler import InputHandler
 from log_panel import LogPanel
 from screen_capture import ScreenCaptureThread, enable_video_capture
-from settings_panel import SettingsPanel
+from settings_panel import SettingsPanel, agents_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -275,7 +275,7 @@ class MainWindow(QMainWindow):
         # UI
         self.screen_view = ScreenView(self.input_handler)
         self.doctor_panel = DoctorPanel(wda_state=lambda: self.device_manager.wda_state)
-        self.settings_panel = SettingsPanel()
+        self.settings_panel = SettingsPanel(self.settings)
         self.log_panel = LogPanel()
         self._setup_ui()
         self._setup_toolbar()
@@ -297,7 +297,8 @@ class MainWindow(QMainWindow):
         enable_video_capture()
         threading.Thread(target=stop_leftover_wda, name='leftover-wda', daemon=True).start()
         self.device_manager.start_discovery()
-        self.agent_api.start()
+        remove_stale_api_file()
+        self._set_agents_enabled(agents_enabled(self.settings))
         QTimer.singleShot(0, self._run_doctor_on_first_launch)
 
     # --- UI setup ---
@@ -427,7 +428,12 @@ class MainWindow(QMainWindow):
         self._device_label = QLabel("")
         self._fps_label = QLabel("")
         self._battery_label = QLabel("")
+        self._agents_label = QLabel("Agent control on")
+        self._agents_label.setStyleSheet("color: #0a84ff; font-weight: 600;")
+        self._agents_label.setToolTip("AI agents and scripts can control the iPhone (Settings)")
+        self._agents_label.setVisible(False)
         statusbar.addWidget(self._status_label, stretch=1)
+        statusbar.addPermanentWidget(self._agents_label)
         statusbar.addPermanentWidget(self._device_label)
         statusbar.addPermanentWidget(self._fps_label)
         statusbar.addPermanentWidget(self._battery_label)
@@ -441,6 +447,7 @@ class MainWindow(QMainWindow):
         self.input_handler.wda_status_changed.connect(self._on_wda_status)
         self.doctor_panel.wda_downloaded.connect(self._on_wda_downloaded)
         self.agent_api.gesture_sent.connect(self.screen_view.show_agent_touch)
+        self.settings_panel.agents_toggled.connect(self._set_agents_enabled)
         self._battery_ready.connect(self._battery_label.setText)
 
     # --- Window size ---
@@ -709,6 +716,16 @@ class MainWindow(QMainWindow):
         self._on_device_disconnected()
         self.device_manager.disconnect()
         self.device_manager.start_discovery()
+
+    # --- Agent control ---
+
+    def _set_agents_enabled(self, enabled: bool):
+        """Start or stop the agent API (and with it the MCP server's and CLI's device control)."""
+        if enabled:
+            self.agent_api.start()
+        else:
+            self.agent_api.stop()
+        self._agents_label.setVisible(self.agent_api.is_running)
 
     # --- Window lifecycle ---
 

@@ -10,8 +10,9 @@ from urllib.parse import urlencode
 
 import paths
 
-NOT_RUNNING = ("Mirror my iPhone isn't running. Open the app (or run `mirror-my-iphone open`), "
-               "then connect the iPhone with a USB cable and unlock it.")
+NOT_RUNNING = ("Mirror my iPhone isn't running, or agent control is off. Open the app, turn on "
+               "Settings › \"Allow AI agents and scripts to control the iPhone\", then connect the "
+               "iPhone with a USB cable and unlock it.")
 
 
 class AgentAPIError(Exception):
