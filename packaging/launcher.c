@@ -20,10 +20,6 @@
 #include <string.h>
 #include <unistd.h>
 
-#ifndef APP_VERSION
-#define APP_VERSION "dev" /* set by build_app.sh */
-#endif
-
 typedef int (*py_bytes_main_t)(int, char **);
 
 /* Read a whole file into a NUL-terminated buffer. Returns NULL if it can't be read. */
@@ -67,24 +63,13 @@ static int venv_ready(const char *venv, const char *requirements) {
     return access(python, X_OK) == 0 && same_contents(requirements, stamp);
 }
 
-/* The first usable environment: $MIRROR_MY_IPHONE_VENV, the one the Homebrew cask builds in its
-   Caskroom, then ~/Library/Application Support/Mirror my iPhone/venv (made by setup.command). */
+/* The app's only environment: ~/Library/Application Support/Mirror my iPhone/venv (made by
+   setup.command). No environment variable or Homebrew Caskroom can point it at another Python. */
 static int find_venv(const char *requirements, char *venv, size_t size) {
     const char *home = getenv("HOME");
-    const char *override = getenv("MIRROR_MY_IPHONE_VENV");
-    char candidates[4][PATH_MAX];
-    int count = 0;
-    if (override && *override) snprintf(candidates[count++], PATH_MAX, "%s", override);
-    snprintf(candidates[count++], PATH_MAX, "/opt/homebrew/Caskroom/mirror-my-iphone/%s/venv", APP_VERSION);
-    snprintf(candidates[count++], PATH_MAX, "/usr/local/Caskroom/mirror-my-iphone/%s/venv", APP_VERSION);
-    snprintf(candidates[count++], PATH_MAX, "%s/Library/Application Support/Mirror my iPhone/venv", home ? home : "");
-    for (int i = 0; i < count; i++) {
-        if (venv_ready(candidates[i], requirements)) {
-            snprintf(venv, size, "%s", candidates[i]);
-            return 1;
-        }
-    }
-    return 0;
+    if (!home || !*home) return 0;
+    snprintf(venv, size, "%s/Library/Application Support/Mirror my iPhone/venv", home);
+    return venv_ready(venv, requirements);
 }
 
 /* Cut `path` after its last '/' `levels` times, in place. */

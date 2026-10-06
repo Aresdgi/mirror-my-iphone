@@ -1,9 +1,9 @@
 #!/bin/bash
-# mirror-my-iphone — command-line companion of Mirror my iPhone, put on the PATH by the Homebrew cask.
+# mirror-my-iphone — command-line companion of Mirror my iPhone (link it into your PATH, see README).
 # Runs cli.py from the app bundle with the app's Python environment. See: mirror-my-iphone --help
 set -euo pipefail
 
-# Follow Homebrew's symlink back into the app bundle
+# Follow a symlink (e.g. from /usr/local/bin) back into the app bundle
 SELF="${BASH_SOURCE[0]}"
 while [ -L "$SELF" ]; do
     DIR="$(cd "$(dirname "$SELF")" && pwd)"
@@ -11,18 +11,9 @@ while [ -L "$SELF" ]; do
     [[ "$SELF" != /* ]] && SELF="$DIR/$SELF"
 done
 RESOURCES="$(cd "$(dirname "$SELF")/.." && pwd)"
-VERSION="$(/usr/bin/plutil -extract CFBundleShortVersionString raw "$RESOURCES/../Info.plist")"
-DEFAULT_VENV="$HOME/Library/Application Support/Mirror my iPhone/venv"
-
-# Same search order as the app's launcher (launcher.c)
-for VENV in "${MIRROR_MY_IPHONE_VENV:-}" "/opt/homebrew/Caskroom/mirror-my-iphone/$VERSION/venv" \
-    "/usr/local/Caskroom/mirror-my-iphone/$VERSION/venv" "$DEFAULT_VENV"; do
-    [ -n "$VENV" ] && [ -x "$VENV/bin/python3" ] \
-        && cmp -s "$RESOURCES/app/requirements.lock" "$VENV/.requirements.lock" && break
-    VENV=""
-done
-if [ -z "$VENV" ]; then
-    VENV="$DEFAULT_VENV"
-    "$RESOURCES/bootstrap.sh" "$VENV" >&2
+# The same, only environment as the app's launcher (launcher.c)
+VENV="$HOME/Library/Application Support/Mirror my iPhone/venv"
+if ! { [ -x "$VENV/bin/python3" ] && cmp -s "$RESOURCES/app/requirements.lock" "$VENV/.requirements.lock"; }; then
+    "$RESOURCES/bootstrap.sh" >&2
 fi
 exec "$VENV/bin/python3" "$RESOURCES/app/cli.py" "$@"

@@ -1,17 +1,16 @@
 #!/bin/bash
 # Creates or updates the Python environment (a venv) Mirror my iPhone runs in.
 #
-#   bootstrap.sh [VENV]
+#   bootstrap.sh
 #
-# The Homebrew cask runs it after installing, with a venv in its Caskroom directory. Without an
-# argument (setup.command, when the app finds no environment) it uses $MIRROR_MY_IPHONE_VENV or
-# ~/Library/Application Support/Mirror my iPhone/venv.
+# setup.command runs it when the app finds no up-to-date environment. The venv is always
+# ~/Library/Application Support/Mirror my iPhone/venv, the only one the app uses.
 set -euo pipefail
 
 RESOURCES="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REQUIREMENTS="$RESOURCES/app/requirements.lock"
 BUILD_REQUIREMENTS="$RESOURCES/app/requirements-build.lock"
-VENV="${1:-${MIRROR_MY_IPHONE_VENV:-$HOME/Library/Application Support/Mirror my iPhone/venv}}"
+VENV="$HOME/Library/Application Support/Mirror my iPhone/venv"
 STAMP="$VENV/.requirements.lock"
 
 find_python() {

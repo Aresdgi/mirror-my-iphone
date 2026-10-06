@@ -1,12 +1,11 @@
 #!/bin/bash
-# Builds "dist/Mirror my iPhone.app" and dist/Mirror-my-iPhone-<version>.zip (the Homebrew cask's download).
+# Builds "dist/Mirror my iPhone.app" (and a zip of it) from this checkout. Nothing is downloaded or published.
 #
 #   packaging/build_app.sh
 #
 # The bundle holds a small native launcher, the app's Python sources and its icon. Python and the
-# dependencies live outside it, in a venv that bootstrap.sh creates: in the Caskroom when
-# installed with Homebrew, else in ~/Library/Application Support/Mirror my iPhone. Needs Xcode's
-# command line tools.
+# dependencies live outside it, in a venv that bootstrap.sh creates on the first launch, in
+# ~/Library/Application Support/Mirror my iPhone. Needs Xcode's command line tools.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -27,7 +26,7 @@ printf 'APPL????' > "$APP/Contents/PkgInfo"
 
 # Launcher, for Apple silicon and Intel
 clang -O2 -Wall -Wextra -Werror -arch arm64 -arch x86_64 -mmacosx-version-min=13.0 \
-    -DAPP_VERSION="\"$VERSION\"" -o "$APP/Contents/MacOS/Mirror my iPhone" "$PACKAGING/launcher.c"
+    -o "$APP/Contents/MacOS/Mirror my iPhone" "$PACKAGING/launcher.c"
 
 # Icon
 ICONSET="$(mktemp -d)/AppIcon.iconset"
@@ -48,7 +47,7 @@ chmod +x "$APP/Contents/Resources/bootstrap.sh" "$APP/Contents/Resources/setup.c
     "$APP/Contents/Resources/bin/mirror-my-iphone"
 xattr -cr "$APP"
 
-# Ad-hoc signature: required for arm64 code. The app isn't notarized (the cask clears quarantine).
+# Ad-hoc signature: required for arm64 code. The app isn't notarized; built locally, it has no quarantine flag.
 codesign --force --sign - --timestamp=none "$APP"
 codesign --verify --strict "$APP"
 
