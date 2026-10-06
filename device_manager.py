@@ -6,6 +6,7 @@ Uses pymobiledevice3 for all device communication over USB.
 import asyncio
 import logging
 import os
+import re
 import signal
 import subprocess
 import threading
@@ -28,13 +29,20 @@ xcodebuild_logger = logging.getLogger('wda.xcodebuild')
 RETRY_DELAY = 10
 
 
-def _log_output(stream, log: logging.Logger, on_line=None):
-    """Forward a subprocess's output to a logger, line by line, until it closes.
-    Also keeps the pipe drained — a full pipe would block the subprocess."""
+# Once WDA runs, xcodebuild prints XCTest's activity, which names the app in front after every
+# gesture ("Find the Application 'com.example.app'"). Only lines like these are logged from then on.
+_XCODEBUILD_PROBLEM = re.compile(r'error|fail|exception|crash|\*\* TEST', re.I)
+
+
+def _log_output(stream, log: logging.Logger, on_line=None, should_log=None):
+    """Forward a subprocess's output to a logger, line by line, until it closes (only the lines
+    `should_log` accepts, if given). Also keeps the pipe drained — a full pipe would block the
+    subprocess."""
     for line in stream:
         line = line.rstrip()
         if line:
-            log.debug(line)
+            if should_log is None or should_log(line):
+                log.debug(line)
             if on_line:
                 on_line(line)
 
@@ -412,8 +420,10 @@ class DeviceManager(QObject):
         return True
 
     def _watch_wda(self, proc: subprocess.Popen):
-        """Log xcodebuild's output, notice when WDA is up, and explain why it stopped."""
+        """Log xcodebuild's output, notice when WDA is up, and explain why it stopped. While WDA
+        runs only problems are logged; the last lines are kept in memory to explain a failure."""
         recent = deque(maxlen=300)
+        running = threading.Event()
 
         def on_line(line: str):
             recent.append(line)
@@ -426,10 +436,12 @@ class DeviceManager(QObject):
                     threading.Thread(target=self.stop_wda, daemon=True).start()
                     return
                 self.wda_port = url.port or paths.WDA_PORT
+                running.set()
                 logger.info(f"WebDriverAgent is up on the iPhone (loopback only, port {self.wda_port})")
                 self._set_wda_state('running', "WebDriverAgent is running.")
 
-        _log_output(proc.stdout, xcodebuild_logger, on_line)
+        _log_output(proc.stdout, xcodebuild_logger, on_line,
+                    should_log=lambda line: not running.is_set() or _XCODEBUILD_PROBLEM.search(line))
         code = proc.wait()
         if proc is not self._wda_proc:
             return  # stopped on purpose
