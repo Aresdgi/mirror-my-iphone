@@ -16,6 +16,10 @@ class USBConnectionError(ConnectionError):
     """The iPhone, or the server on it, can't be reached (unplugged, or nothing listening)."""
 
 
+class DeviceNotConnected(USBConnectionError):
+    """The iPhone isn't connected by USB."""
+
+
 def open_socket(udid: str, port: int) -> socket.socket:
     """A blocking socket connected to `port` on the iPhone with this UDID, through usbmuxd."""
     from pymobiledevice3.usbmux import list_devices
@@ -23,7 +27,7 @@ def open_socket(udid: str, port: int) -> socket.socket:
     async def connect():
         devices = [d for d in await list_devices() if d.is_usb and d.matches_udid(udid)]
         if not devices:
-            raise USBConnectionError("the iPhone isn't connected by USB")
+            raise DeviceNotConnected("the iPhone isn't connected by USB")
         return await devices[0].connect(port)
 
     try:

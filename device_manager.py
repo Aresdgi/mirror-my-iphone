@@ -459,20 +459,26 @@ class DeviceManager(QObject):
                 proc.wait()
             _write_wda_pid(None)
             udid = self._current_udid
-            if udid and self._wda_answers(udid):
+            answers = self._wda_answers(udid) if udid else None
+            if answers:
                 logger.warning("WebDriverAgent still answers on the iPhone after stopping xcodebuild. "
                                "Close WebDriverAgentRunner on the iPhone (or restart it).")
+            elif answers is None:
+                logger.info("Stopped xcodebuild. Couldn't check that WebDriverAgent ended on the iPhone, "
+                            "which is disconnected (it only listens on the iPhone's loopback).")
             else:
-                logger.info("WebDriverAgent stopped")
+                logger.info("WebDriverAgent stopped (checked on the iPhone)")
         self._set_wda_state('idle')
 
-    def _wda_answers(self, udid: str) -> bool:
+    def _wda_answers(self, udid: str) -> bool | None:
         """Whether something still accepts connections on WDA's port on the iPhone, after giving it
-        a few seconds to go away."""
-        from usbmux_http import USBConnectionError, open_socket
+        a few seconds to go away. None if the iPhone isn't connected, so it can't be checked."""
+        from usbmux_http import DeviceNotConnected, USBConnectionError, open_socket
         for _ in range(10):
             try:
                 open_socket(udid, self.wda_port).close()
+            except DeviceNotConnected:
+                return None
             except USBConnectionError:
                 return False
             time.sleep(0.5)
