@@ -119,8 +119,7 @@ class DeviceManager(QObject):
         super().__init__(parent)
         self._state = ConnectionState.DISCONNECTED
         self._lockdown = None
-        self._rsd = None
-        self._screenshot_provider = None   # rsd (tunnel) or lockdown (direct)
+        self._screenshot_provider = None   # the lockdown connection
         self._screenshot_channels = []      # (DvtProvider, Screenshot) pairs, usable in parallel
         self._device_info = {}
         self._lock = threading.Lock()
@@ -252,48 +251,16 @@ class DeviceManager(QObject):
         self._current_udid = udid
 
         # DVT screenshots are only the fallback for when the USB video stream is unavailable.
-        # Try the tunnel first (needed for iOS 17+), then direct.
+        # They work over lockdown up to iOS 16; iOS 17 and later would need the developer tunnel
+        # (tunneld, which runs as root), which this app deliberately doesn't use.
         try:
-            await self._connect_dvt_tunnel()
-        except Exception as tunnel_err:
-            logger.info(f"Tunnel DVT failed ({tunnel_err}), trying direct...")
-            try:
-                await self._connect_dvt_direct()
-            except Exception as direct_err:
-                logger.warning(
-                    f"Screenshot fallback unavailable ({direct_err}). Mirroring uses the USB video "
-                    "stream, which doesn't need it; on iOS 17+ the fallback needs the developer tunnel."
-                )
-
-    async def _connect_dvt_tunnel(self):
-        """Connect DVT via tunneld (required for iOS 17+).
-
-        Uses pymobiledevice3's tunneld API to get a RemoteServiceDiscoveryService
-        which provides access to developer services through the tunnel.
-        """
-        from pymobiledevice3.tunneld.api import get_tunneld_devices
-
-        tunneld_devices = await get_tunneld_devices()
-        if not tunneld_devices:
-            raise ConnectionError("no tunnel found — tunneld isn't running")
-
-        # Find matching device by UDID, or use first available
-        target = self._current_udid.replace('-', '')
-        rsd = next(
-            (d for d in tunneld_devices if (d.udid or '').replace('-', '') == target),
-            tunneld_devices[0],
-        )
-        # get_tunneld_devices opens a connection to every tunnel — close the ones we don't use
-        for device in tunneld_devices:
-            if device is not rsd:
-                await device.close()
-
-        self._rsd = rsd
-        await self._open_screenshot_service(rsd)
-        logger.info("DVT screenshot service connected via tunnel")
+            await self._connect_dvt_direct()
+        except Exception as e:
+            logger.info(f"Screenshot fallback unavailable ({e}). Mirroring uses the USB video stream, "
+                        "which doesn't need it.")
 
     async def _connect_dvt_direct(self):
-        """Connect DVT directly via lockdown (works for iOS < 17)."""
+        """Connect DVT via lockdown (iOS 16 and earlier)."""
         await self._open_screenshot_service(self._lockdown)
         logger.info("DVT screenshot service connected (direct)")
 
@@ -555,17 +522,16 @@ class DeviceManager(QObject):
         logger.info("Disconnected from device")
 
     async def _close_connections_async(self):
-        """Close screenshot, DVT, tunnel and lockdown connections, ignoring errors."""
+        """Close screenshot, DVT and lockdown connections, ignoring errors."""
         channels = [conn for pair in self._screenshot_channels for conn in reversed(pair)]
         self._screenshot_channels = []
         self._screenshot_provider = None
-        for conn in (*channels, self._rsd, self._lockdown):
+        for conn in (*channels, self._lockdown):
             if conn is not None:
                 try:
                     await conn.close()
                 except Exception:
                     pass
-        self._rsd = None
         self._lockdown = None
 
     def cleanup(self):

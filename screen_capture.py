@@ -147,7 +147,7 @@ class ScreenCaptureThread(QThread):
         channels = self._device_manager.open_screenshot_channels(DVT_CHANNELS)
         if channels == 0:
             self._fail("No screen source: the USB stream isn't available and the screenshot fallback "
-                       "needs the developer tunnel — see the Doctor tab")
+                       "only works up to iOS 16 — see the Doctor tab")
             return
         logger.info(f"Capturing via DVT screenshots ({channels} parallel channels)")
         self.mode_changed.emit("screenshots")

@@ -3,7 +3,6 @@ Paths — where Mirror my iPhone keeps its Python environment, logs, settings an
 Shared by the app, the doctor and the CLI.
 """
 
-import sys
 from pathlib import Path
 
 APP_NAME = 'Mirror my iPhone'
@@ -31,9 +30,6 @@ API_FILE = SUPPORT_DIR / 'api.json'
 # PID of the WDA port forwarder the app started, to recognise one left over by a crash
 FORWARDER_PID_FILE = SUPPORT_DIR / 'port-forward.pid'
 
-# tunneld runs as root, so it logs to /tmp rather than into the user's Library
-TUNNELD_LOG = Path('/tmp/mirror-my-iphone-tunneld.log')
-
 
 def bundle_path() -> Path | None:
     """The enclosing .app when running from one (sources live in <app>/Contents/Resources/app)."""
@@ -42,7 +38,3 @@ def bundle_path() -> Path | None:
         return contents.parent
     return None
 
-
-def tunneld_command() -> list[str]:
-    """Command that starts pymobiledevice3's developer tunnel daemon (needs root)."""
-    return [sys.executable, '-m', 'pymobiledevice3', 'remote', 'tunneld']

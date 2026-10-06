@@ -7,9 +7,7 @@ Checks only read state; fixes in ACTIONS run only when the user asks for them.
 
 import asyncio
 import logging
-import shlex
 import subprocess
-import time
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -155,7 +153,6 @@ def iter_checks(in_app: bool = True, wda_state: Callable[[], tuple[str, str]] | 
             "On the iPhone: Settings › Developer › Enable UI Automation → On.",
         )
 
-        yield _check_tunnel(device)
         yield _check_disk_image(device)
     finally:
         device.close()
@@ -205,7 +202,7 @@ def _check_video_source(device: _Device) -> Check:
         return Check(MIRRORING, title, Status.OK, "Available — up to 60 FPS.")
     return Check(MIRRORING, title, Status.WARN, "The iPhone isn't offered as a video source yet.",
                  fix="Unlock the iPhone and re-check. Until then Mirror my iPhone falls back to "
-                     "screenshots, which are slower and need the developer tunnel (see Optional).")
+                     "screenshots, which are slower and only work up to iOS 16.")
 
 
 def _check_camera_access(in_app: bool) -> Check:
@@ -331,30 +328,6 @@ def _manual_check(title: str, done: bool, instructions: str) -> Check:
     return Check(TOUCH, title, Status.INFO, instructions)
 
 
-def _check_tunnel(device: _Device) -> Check:
-    title = 'Developer tunnel (tunneld)'
-    if device.ios_version and _ios_major(device.ios_version) < 17:
-        return Check(OPTIONAL, title, Status.OK, "Not needed before iOS 17.")
-    from pymobiledevice3.tunneld.api import get_tunneld_tunnels
-
-    loop = asyncio.new_event_loop()
-    try:
-        tunnels = loop.run_until_complete(get_tunneld_tunnels())
-    except Exception:
-        return Check(OPTIONAL, title, Status.WARN,
-                     "Not running. Only the screenshot fallback needs it (when the USB stream isn't available).",
-                     fix="Start it from the app (asks for your password), or run: "
-                         f"sudo {shlex.join(paths.tunneld_command())}",
-                     action='start_tunnel', action_label='Start…')
-    finally:
-        loop.close()
-    udids = {udid.replace('-', '') for udid in tunnels}
-    if device.usb is not None and device.usb.serial.replace('-', '') not in udids:
-        return Check(OPTIONAL, title, Status.WARN, "Running, but it has no tunnel to this iPhone yet.",
-                     fix="Unlock the iPhone and re-check in a few seconds.")
-    return Check(OPTIONAL, title, Status.OK, "Running.")
-
-
 def _check_disk_image(device: _Device) -> Check:
     title = 'Developer disk image'
     if not device.paired:
@@ -462,32 +435,6 @@ def _download_wda() -> str:
     return f"Downloaded to {_short_path(project.parent)}."
 
 
-def _applescript_string(text: str) -> str:
-    return '"' + text.replace('\\', '\\\\').replace('"', '\\"') + '"'
-
-
-def _start_tunnel() -> str:
-    from pymobiledevice3.tunneld.api import get_tunneld_tunnels
-
-    command = f"{shlex.join(paths.tunneld_command())} --daemonize > {paths.TUNNELD_LOG} 2>&1"
-    script = (f"do shell script {_applescript_string(command)} "
-              f"with prompt {_applescript_string('Mirror my iPhone wants to start the developer tunnel.')} "
-              f"with administrator privileges")
-    result = subprocess.run(['osascript', '-e', script], capture_output=True, text=True, timeout=300)
-    if result.returncode != 0:
-        if '-128' in result.stderr:
-            raise RuntimeError("Cancelled")
-        raise RuntimeError(result.stderr.strip() or f"osascript exited with {result.returncode}")
-    deadline = time.monotonic() + 15
-    while time.monotonic() < deadline:
-        try:
-            asyncio.run(get_tunneld_tunnels())
-            return "Developer tunnel started."
-        except Exception:
-            time.sleep(0.5)
-    raise RuntimeError(f"tunneld didn't come up — see {paths.TUNNELD_LOG}")
-
-
 ACTIONS: dict[str, Callable[[], str]] = {
     'pair': _pair,
     'reveal_developer_mode': _reveal_developer_mode,
@@ -496,5 +443,4 @@ ACTIONS: dict[str, Callable[[], str]] = {
     'install_xcode': _open('macappstore://apps.apple.com/app/id497799835'),
     'open_xcode': _open('Xcode', '-a'),
     'download_wda': _download_wda,
-    'start_tunnel': _start_tunnel,
 }

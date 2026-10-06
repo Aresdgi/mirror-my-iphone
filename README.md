@@ -96,7 +96,6 @@ The Doctor opens on first launch; run it again from Help › Run Doctor. Mirrori
 | Xcode and an Apple ID in Xcode | Touch control | App Store; Xcode › Settings › Accounts (a free Apple ID works) |
 | WebDriverAgent | Touch control | The Doctor downloads it; the app builds it, installs it on the iPhone and starts it |
 | Developer trusted, UI Automation on | Touch control | Settings › General › VPN & Device Management › Trust; Settings › Developer › Enable UI Automation |
-| Developer tunnel (`tunneld`) | Optional: screenshot fallback on iOS 17+ | The Doctor starts it (asks for your password) |
 
 ### Controls
 
@@ -150,7 +149,7 @@ For Claude Desktop, add the server to `claude_desktop_config.json`:
 
 ### How it works
 
-- **Screen:** an AVFoundation USB video stream at up to 60 FPS, the same one QuickTime Player records. While it runs, iOS shows a clean status bar (09:41, full battery) and may route its audio to the Mac. Fallback: the DVT Screenshot Service over pymobiledevice3 (~20 FPS; needs the developer tunnel on iOS 17+).
+- **Screen:** an AVFoundation USB video stream at up to 60 FPS, the same one QuickTime Player records. While it runs, iOS shows a clean status bar (09:41, full battery) and may route its audio to the Mac. Fallback: the DVT Screenshot Service over pymobiledevice3 (~20 FPS; iOS 16 and earlier only — this fork never starts the root developer tunnel).
 - **Touch:** mouse positions are converted to iPhone points and sent as W3C actions to [WebDriverAgent](https://github.com/appium/WebDriverAgent) (port 8100), which the app builds and runs with `xcodebuild`, signed with the first Apple ID in Xcode.
 - **Agents:** the agent API runs inside the app on 127.0.0.1:8101 (or a free port, written to `api.json`). Agent gestures share WebDriverAgent's queue with your mouse; screenshots come from the same video stream you see.
 - **USB:** pymobiledevice3 (usbmux and lockdown). **UI:** PyQt6, run in the app's own process by a small native launcher.

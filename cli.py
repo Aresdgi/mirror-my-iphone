@@ -4,7 +4,6 @@ mirror-my-iphone — command-line companion of the Mirror my iPhone app.
 
     mirror-my-iphone            open the app
     mirror-my-iphone doctor     check the prerequisites and explain how to fix what's missing
-    mirror-my-iphone tunnel     run the developer tunnel in this terminal (iOS 17+, needs sudo)
     mirror-my-iphone logs       follow the app's log
 
 Control the iPhone through the running app (for scripts and AI agents; see agent_api.py):
@@ -22,7 +21,6 @@ Control the iPhone through the running app (for scripts and AI agents; see agent
 import argparse
 import json
 import os
-import shlex
 import shutil
 import subprocess
 import sys
@@ -87,12 +85,6 @@ def cmd_doctor(_args) -> int:
     status, headline = doctor.summarize(checks)
     print('\n' + _style(headline, _COLORS[status.value], color))
     return 1 if status == doctor.Status.FAIL else 0
-
-
-def cmd_tunnel(_args) -> int:
-    command = ['sudo', *paths.tunneld_command()]
-    print(f"Starting the developer tunnel (stop it with Ctrl-C):\n  {shlex.join(command)}\n", flush=True)
-    os.execvp('sudo', command)
 
 
 def cmd_logs(_args) -> int:
@@ -166,7 +158,6 @@ def main() -> int:
     commands = parser.add_subparsers(dest='command', metavar='command')
     commands.add_parser('open', help="open the app (default)").set_defaults(run=cmd_open)
     commands.add_parser('doctor', help="check prerequisites").set_defaults(run=cmd_doctor)
-    commands.add_parser('tunnel', help="run the developer tunnel (sudo)").set_defaults(run=cmd_tunnel)
     commands.add_parser('logs', help="follow the app's log").set_defaults(run=cmd_logs)
 
     # Device control through the running app
